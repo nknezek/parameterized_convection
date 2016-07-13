@@ -91,18 +91,17 @@ class CoreLayer(Layer):
         Layer.__init__(self,inner_radius,outer_radius, params)
         self.light_alloy = self.params.core.x_0
 
-    def set_light_alloy_concentration(self, x0=None):
+    def set_light_alloy_concentration(self):
         '''
         Equation (7) from Stevenson 1983
         '''
-        if x0 == None:
-            x0 = self.params.core.x0
-        R_c = self.params.R_c
-        R_i = self.params.R_i
-        self.light_alloy = x0*(R_c**3)/(R_c**3-R_i**3)
+        pc = self.params.core
+        R_c = self.inner_radius
+        R_i = self.outer_radius
+        self.light_alloy = pc.x_0*(R_c**3)/(R_c**3-R_i**3)
         return self.light_alloy
 
-    def set_inner_core_radius(self,R_i):
+    def set_inner_core_radius(self, R_i):
         self.inner_radius = R_i
         return self.inner_radius
 
@@ -110,36 +109,33 @@ class CoreLayer(Layer):
     def core_mantle_boundary_temp(self):
         return  self.T_average / self.mu
 
-    def stevenson_liquidus(self, P_io):
+    def stevenson_liquidus(self, P):
         '''
         Equation (3) from Stevenson 1983
         
-        Calculates the liquidus temp for a given pressure at the inner core
-        outer core boundary Pio
+        Calculates the liquidus temp for a given pressure in the core P
         '''
         x  = self.light_alloy
         pc = self.params.core
-        return pc.T_m0*(1.-pc.alpha*x)*(1. + pc.T_m1*P_io +pc.T_m2*P_io**2.)
+        return pc.T_m0 * (1. - pc.alpha * x) * (1. + pc.T_m1 * P + pc.T_m2 * P**2.)
     
-    def stevenson_adiabat(self,P_io, T_cmb):
+    def stevenson_adiabat(self, P, T_cmb):
         '''
         Equation (4) from Stevenson 1983
 
-        Calculates adiabat temp for a given pressure at the inner core 
-        outer core boundary Pio
+        Calculates adiabatic temperature for a given pressure within the core P, given the temperature at the CMB T_cmb
         '''
         pc = self.params.core
-        return T_cmb*(1.+pc.T_a1*P_io+pc.T_a2*P_io**2.)/(1.+pc.T_a1*pc.P_cm+pc.T_a2*pc.P_cm**2.)
+        return T_cmb * (1. + pc.T_a1*P + pc.T_a2*P**2.) / (1. + pc.T_a1*pc.P_cm + pc.T_a2*pc.P_cm**2.)
     
     def calculate_pressure_io_boundary(self, T_cmb):
         pc = self.params.core
-        opt_function = lambda P_io: (self.stevenson_adiabat(P_io, T_cmb)-self.stevenson_liquidus(P_io))
-        if opt_function(pc.P_c)*opt_function(pc.P_cm) >= 0.:
-            import ipdb; ipdb.set_trace()
-            raise ValueError("OOGA BOOGA")
+        opt_function = lambda P: (self.stevenson_adiabat(P, T_cmb)-self.stevenson_liquidus(P))
+        if self.stevenson_liquidus(pc.P_c) <= self.stevenson_adiabat(pc.P_c,T_cmb):
+            P_io = pc.P_c
         else:
-            res = opt.brentq(opt_function, pc.P_c, pc.P_cm)
-            return res
+            P_io = opt.brentq(opt_function, pc.P_c, pc.P_cm)
+        return P_io
 
     def inner_core_radius(self, T_cmb): 
         '''
@@ -198,7 +194,7 @@ class MantleLayer(Layer):
     
     def mantle_rayleigh_number(self, T_upper_mantle, T_cmb):
         '''
-        Equation (19) Stevesnon et al 1983
+        Equation (19) Stevenson et al 1983
         '''
         pm = self.params.mantle
         nu = self.kinematic_viscosity(T_upper_mantle)
@@ -210,12 +206,12 @@ class MantleLayer(Layer):
         delta_T_effective = upper_boundary_delta_T + lower_boundary_delta_T
         return pm.g*pm.alpha*( delta_T_effective)*np.power(self.thickness,3.)/(nu*pm.K)
     
-    def boundary_layer_thickness(self, Ra_mantle):
+    def boundary_layer_thickness(self, Ra):
         '''
         Equation (18) Stevenson et al 1983
         '''
         pm = self.params.mantle
-        return self.thickness*np.power(pm.Ra_crit/Ra_mantle,pm.beta)
+        return self.thickness*np.power(pm.Ra_crit/Ra, pm.beta)
 
     def upper_boundary_layer_thickness(self, T_upper_mantle, T_cmb):
         '''
@@ -235,20 +231,20 @@ class MantleLayer(Layer):
         delta_T_lower_boundary_layer = T_cmb - T_lower_mantle
         assert( delta_T_lower_boundary_layer > 0.0 )
         delta = np.power( pm.Ra_boundary_crit*nu_crit*pm.K/(pm.g*pm.alpha*(delta_T_lower_boundary_layer)), 0.333 )
-        Ra_mantle = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
-        return np.minimum(delta, self.boundary_layer_thickness(Ra_mantle) )
+        Ra_effective = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
+        return np.minimum(delta, self.boundary_layer_thickness(Ra_effective) )
 
     def upper_boundary_flux(self, T_upper_mantle, T_cmb):
         pm = self.params.mantle
-        delta_T = self.params.T_s - T_upper_mantle
+        delta_T = T_upper_mantle - self.params.T_s
         upper_boundary_layer_thickness = self.upper_boundary_layer_thickness(T_upper_mantle, T_cmb)
-        return -pm.k*delta_T/upper_boundary_layer_thickness
+        return pm.k*delta_T/upper_boundary_layer_thickness
 
     def lower_boundary_flux(self, T_upper_mantle, T_cmb):
         pm = self.params.mantle
         delta_T = T_cmb - self.lower_mantle_temperature(T_upper_mantle)
         lower_boundary_layer_thickness = self.lower_boundary_layer_thickness(T_upper_mantle, T_cmb)
-        return -pm.k*delta_T/lower_boundary_layer_thickness
+        return pm.k*delta_T/lower_boundary_layer_thickness
 
     def mantle_energy_balance(self, time, T_upper_mantle, T_cmb):
         pm = self.params.mantle
@@ -258,9 +254,11 @@ class MantleLayer(Layer):
         effective_heat_capacity = pm.rho*pm.C*pm.mu*self.volume
         internal_heat_energy = self.heat_production(time)*self.volume
         cmb_flux = self.lower_boundary_flux(T_upper_mantle, T_cmb)
-        surface_flux = self.upper_boundary_flux(T_upper_mantle, T_cmb) 
-        flux_energy = mantle_surface_area*surface_flux - core_surface_area*cmb_flux
-        dTdt = (internal_heat_energy - flux_energy)/effective_heat_capacity
+        surface_flux = self.upper_boundary_flux(T_upper_mantle, T_cmb)
+        # print(cmb_flux, surface_flux)
+        net_flux_out = mantle_surface_area*surface_flux - core_surface_area*cmb_flux
+        dTdt = (internal_heat_energy - net_flux_out)/effective_heat_capacity
+        # print(dTdt, net_flux_out, internal_heat_energy)
         return dTdt
 
     def ODE( self, T_u_initial, T_cmb ):
@@ -273,40 +271,41 @@ class Parameters(object):
         pass
 
 Stevenson = Parameters('Stevenson 1983')
-Stevenson.R_p = 6371e3 # - m
-Stevenson.R_c = 3485e3 # - m
+Stevenson.R_p0 = 6371e3 # - m
+Stevenson.R_c0 = 3485e3 # - m
 Stevenson.g = 10. # - m/s^2
 Stevenson.T_s = 1073. # - K
 
 Stevenson.mantle = Parameters('Stevenson 1983, for mantle')
+Stevenson.mantle.mu = 1.3
+Stevenson.mantle.alpha = 2e-5 # - /K
+Stevenson.mantle.k = 4.0 # - W/m-K
+Stevenson.mantle.K = 1e6 # - m^2/s
 Stevenson.mantle.rhoC = 4e6 # - J/m^3-K
 Stevenson.mantle.rho = 5000. # - kg/m^3 -- guess as Stevenson never explicitly states his assumption for rho or C
 Stevenson.mantle.C = Stevenson.mantle.rhoC/Stevenson.mantle.rho
-Stevenson.mantle.mu = 1.3
-Stevenson.mantle.Q_0 = 1.7e6 # - W/m^3
-Stevenson.mantle.lam = 1.7e7 # - 1/s
+Stevenson.mantle.Q_0 = 1.7e-7 # - W/m^3
+Stevenson.mantle.lam = 1.38e-17 # - 1/s
 Stevenson.mantle.A = 5.2e4 # - K
 Stevenson.mantle.nu_0 = 4.0e3 # - m^2/s
+Stevenson.mantle.Ra_crit = 5e2 # empirical parameter
 Stevenson.mantle.beta = 0.3
-Stevenson.mantle.alpha = 2e-5 # - /K
-Stevenson.mantle.K = 1e6 # - m^2/s
-Stevenson.mantle.k = 4.0 # - W/m-K
 Stevenson.mantle.g = Stevenson.g
 Stevenson.mantle.Ra_boundary_crit = 2e3 # empirical parameter
-Stevenson.mantle.Ra_crit = 2e3 # empirical parameter
 
 Stevenson.core = Parameters('Stevenson 1983, for core')
-Stevenson.core.rho = 1.3e4 # - kg/m^3
+Stevenson.core.rho = 13000. # - kg/m^3
 Stevenson.core.alpha = 2.
 Stevenson.core.rhoC = Stevenson.mantle.rhoC
-Stevenson.core.x_0 = 0.1 # - wt% S
-Stevenson.core.P_c = 0.36e12 # - Pa
-Stevenson.core.P_cm = 0.14e12 # - Pa
+Stevenson.core.C = Stevenson.core.rhoC/Stevenson.core.rho
+Stevenson.core.x_0 = 0.01 # - wt% S
+Stevenson.core.P_c = 360e9 # - Pa
+Stevenson.core.P_cm = 140e9 # - Pa
 Stevenson.core.mu = 1.2
-Stevenson.core.T_m1 = 6.14e12 # - K-Pa
-Stevenson.core.T_m2 = -4.5e24 # - K-Pa^2
-Stevenson.core.T_a1 = 3.96e12 # - K-Pa
-Stevenson.core.T_a2 = -3.3e24 # - K-Pa^2
+Stevenson.core.T_m1 = 6.14e-12 # - K/Pa
+Stevenson.core.T_m2 = -4.5e-24 # - K/Pa^2
+Stevenson.core.T_a1 = 3.96e-12 # - K/Pa
+Stevenson.core.T_a2 = -3.3e-24 # - K/Pa^2
 
 Stevenson_E1 = copy.deepcopy(Stevenson)
 Stevenson_E1.core.L_Eg = 1e6 # - J/kg
@@ -317,11 +316,12 @@ Stevenson_E2.core.L_Eg = 2e6 # - J/kg
 Stevenson_E2.core.T_m0 = 1980. # - K
 
 
-Earth = Planet( [ CoreLayer( 0.0, Stevenson_E1.R_c, params=Stevenson_E1) , MantleLayer( Stevenson_E1.R_c, Stevenson_E1.R_p, params=Stevenson_E1) ] )
+Earth = Planet( [ CoreLayer( 0.0, Stevenson_E1.R_c0, params=Stevenson_E1) , MantleLayer( Stevenson_E1.R_c0, Stevenson_E1.R_p0, params=Stevenson_E1) ] )
 
-T_cmb_initial = 3000.
+T_cmb_initial = 4500.
 T_mantle_initial = 1500.
-times = np.linspace( 0., 4.e9*np.pi*1.e7)
+Earth_age_yr = 4.568e9*365.25*24.*3600.
+times = np.linspace(0., Earth_age_yr, 100)
 
 t, y = Earth.integrate(T_cmb_initial, T_mantle_initial, times)
 plt.plot( t, y[:,0])
