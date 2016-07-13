@@ -229,6 +229,7 @@ class MantleLayer(Layer):
         average_boundary_layer_temp = (T_upper_mantle + T_lower_mantle)/2
         nu_crit = self.kinematic_viscosity(average_boundary_layer_temp)
         delta_T_lower_boundary_layer = T_cmb - T_lower_mantle
+        # import ipdb; ipdb.set_trace()
         assert( delta_T_lower_boundary_layer > 0.0 )
         delta = np.power( pm.Ra_boundary_crit*nu_crit*pm.K/(pm.g*pm.alpha*(delta_T_lower_boundary_layer)), 0.333 )
         Ra_effective = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
@@ -318,7 +319,7 @@ Stevenson_E2.core.T_m0 = 1980. # - K
 
 Earth = Planet( [ CoreLayer( 0.0, Stevenson_E1.R_c0, params=Stevenson_E1) , MantleLayer( Stevenson_E1.R_c0, Stevenson_E1.R_p0, params=Stevenson_E1) ] )
 
-T_cmb_initial = 4500.
+T_cmb_initial = 5500.
 T_mantle_initial = 1500.
 Earth_age_yr = 4.568e9*365.25*24.*3600.
 times = np.linspace(0., Earth_age_yr, 100)
