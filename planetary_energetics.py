@@ -18,7 +18,7 @@ class Layer(object):
         self.outer_radius = outer_radius
         self.thickness = outer_radius-inner_radius
 
-        assert( self.thickness > 0.0 )
+        assert self.thickness > 0.0
 
         self.inner_surface_area = 4.0 * np.pi * self.inner_radius**2.
         self.outer_surface_area = 4.0 * np.pi * self.outer_radius**2.
@@ -133,6 +133,8 @@ class CoreLayer(Layer):
         opt_function = lambda P: (self.stevenson_adiabat(P, T_cmb)-self.stevenson_liquidus(P))
         if self.stevenson_liquidus(pc.P_c) <= self.stevenson_adiabat(pc.P_c,T_cmb):
             P_io = pc.P_c
+        elif self.stevenson_liquidus(pc.P_cm) >= self.stevenson_adiabat(pc.P_cm,T_cmb):
+            P_io = pc.P_cm
         else:
             P_io = opt.brentq(opt_function, pc.P_c, pc.P_cm)
         return P_io
@@ -201,8 +203,8 @@ class MantleLayer(Layer):
         T_lower_mantle = self.lower_mantle_temperature(T_upper_mantle)
         upper_boundary_delta_T = T_upper_mantle - self.params.T_s
         lower_boundary_delta_T = T_cmb - T_lower_mantle
-        assert( upper_boundary_delta_T > 0.0)
-        assert( lower_boundary_delta_T > 0.0)
+        assert upper_boundary_delta_T > 0.0
+        assert lower_boundary_delta_T > 0.0
         delta_T_effective = upper_boundary_delta_T + lower_boundary_delta_T
         return pm.g*pm.alpha*( delta_T_effective)*np.power(self.thickness,3.)/(nu*pm.K)
     
@@ -230,7 +232,7 @@ class MantleLayer(Layer):
         nu_crit = self.kinematic_viscosity(average_boundary_layer_temp)
         delta_T_lower_boundary_layer = T_cmb - T_lower_mantle
         # import ipdb; ipdb.set_trace()
-        assert( delta_T_lower_boundary_layer > 0.0 )
+        assert delta_T_lower_boundary_layer > 0.0, "{0}, {1}, {2}".format(T_cmb, T_lower_mantle, T_upper_mantle)
         delta = np.power( pm.Ra_boundary_crit*nu_crit*pm.K/(pm.g*pm.alpha*(delta_T_lower_boundary_layer)), 0.333 )
         Ra_effective = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
         return np.minimum(delta, self.boundary_layer_thickness(Ra_effective) )
@@ -272,54 +274,54 @@ class Parameters(object):
         pass
 
 Stevenson = Parameters('Stevenson 1983')
-Stevenson.R_p0 = 6371e3 # - m
-Stevenson.R_c0 = 3485e3 # - m
-Stevenson.g = 10. # - m/s^2
-Stevenson.T_s = 1073. # - K
+Stevenson.R_p0 = 6371e3 # - [m] from Stevenson Table II
+Stevenson.R_c0 = 3485e3 # - [m] from Stevenson pg. 474
+Stevenson.g = 10. # - [m/s^2] from Stevenson Table II
+Stevenson.T_s = 293. # - [K] from Stevenson Table II
 
 Stevenson.mantle = Parameters('Stevenson 1983, for mantle')
-Stevenson.mantle.mu = 1.3
-Stevenson.mantle.alpha = 2e-5 # - /K
-Stevenson.mantle.k = 4.0 # - W/m-K
-Stevenson.mantle.K = 1e6 # - m^2/s
-Stevenson.mantle.rhoC = 4e6 # - J/m^3-K
-Stevenson.mantle.rho = 5000. # - kg/m^3 -- guess as Stevenson never explicitly states his assumption for rho or C
-Stevenson.mantle.C = Stevenson.mantle.rhoC/Stevenson.mantle.rho
-Stevenson.mantle.Q_0 = 1.7e-7 # - W/m^3
-Stevenson.mantle.lam = 1.38e-17 # - 1/s
-Stevenson.mantle.A = 5.2e4 # - K
-Stevenson.mantle.nu_0 = 4.0e3 # - m^2/s
-Stevenson.mantle.Ra_crit = 5e2 # empirical parameter
-Stevenson.mantle.beta = 0.3
-Stevenson.mantle.g = Stevenson.g
+Stevenson.mantle.mu = 1.3 # - [] from Stevenson pg. 473 and Table II
+Stevenson.mantle.alpha = 2e-5 # - [/K] from Stevenson Table I
+Stevenson.mantle.k = 4.0 # - [W/m-K] from Stevenson Table I
+Stevenson.mantle.K = 1e-6 # - [m^2/s] from Stevenson Table I
+Stevenson.mantle.rhoC = 4e6 # - [J/m^3-K] from Stevenson Table I
+Stevenson.mantle.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
+Stevenson.mantle.C = Stevenson.mantle.rhoC/Stevenson.mantle.rho # - [J/K-kg]
+Stevenson.mantle.Q_0 = 1.7e-7 # - [W/m^3] from Stevenson Table I
+Stevenson.mantle.lam = 1.38e-17 # - [1/s] from Stevenson Table I
+Stevenson.mantle.A = 5.2e4 # - [K] from Stevenson Table I
+Stevenson.mantle.nu_0 = 4.0e8 # - [m^2/s] from Stevenson Table I
+Stevenson.mantle.Ra_crit = 5e2 # - [] from Stevenson Table I
+Stevenson.mantle.beta = 0.3 # - [] from Stevenson Table I
+Stevenson.mantle.g = Stevenson.g # - [m/s^2] from Stevenson Table II
 Stevenson.mantle.Ra_boundary_crit = 2e3 # empirical parameter
 
 Stevenson.core = Parameters('Stevenson 1983, for core')
-Stevenson.core.rho = 13000. # - kg/m^3
-Stevenson.core.alpha = 2.
-Stevenson.core.rhoC = Stevenson.mantle.rhoC
+Stevenson.core.rho = 13000. # - [kg/m^3] from Stevenson pg. 474
+Stevenson.core.alpha = 2e-5 # - [/K] from Stevenson Table I
+Stevenson.core.rhoC = Stevenson.mantle.rhoC # - [J/m^3-K] from Stevenson Table I
 Stevenson.core.C = Stevenson.core.rhoC/Stevenson.core.rho
-Stevenson.core.x_0 = 0.01 # - wt% S
-Stevenson.core.P_c = 360e9 # - Pa
-Stevenson.core.P_cm = 140e9 # - Pa
-Stevenson.core.mu = 1.2
-Stevenson.core.T_m1 = 6.14e-12 # - K/Pa
-Stevenson.core.T_m2 = -4.5e-24 # - K/Pa^2
-Stevenson.core.T_a1 = 3.96e-12 # - K/Pa
-Stevenson.core.T_a2 = -3.3e-24 # - K/Pa^2
+Stevenson.core.x_0 = 0.1 # - [wt% S] from Stevenson pg. 474
+Stevenson.core.P_c = 360e9 # - [Pa] from Stevenson pg. 474
+Stevenson.core.P_cm = 140e9 # - [Pa] from Stevenson pg. 474
+Stevenson.core.mu = 1.2 # - [] from Stevenson pg. 473 and Table II
+Stevenson.core.T_m1 = 6.14e-12 # - [K/Pa] from Stevenson Table II
+Stevenson.core.T_m2 = -4.5e-24 # - [K/Pa^2] from Stevenson Table II
+Stevenson.core.T_a1 = 3.96e-12 # - [K/Pa] from Stevenson Table II
+Stevenson.core.T_a2 = -3.3e-24 # - [K/Pa^2] from Stevenson Table II
 
 Stevenson_E1 = copy.deepcopy(Stevenson)
-Stevenson_E1.core.L_Eg = 1e6 # - J/kg
-Stevenson_E1.core.T_m0 = 1950. # - K
+Stevenson_E1.core.L_Eg = 1e6 # - [J/kg] from Stevenson Table III
+Stevenson_E1.core.T_m0 = 1950. # - [K] from Stevenson Table III
 
 Stevenson_E2 = copy.deepcopy(Stevenson)
-Stevenson_E2.core.L_Eg = 2e6 # - J/kg
-Stevenson_E2.core.T_m0 = 1980. # - K
+Stevenson_E2.core.L_Eg = 2e6 # - [J/kg] from Stevenson Table III
+Stevenson_E2.core.T_m0 = 1980. # - [K] from Stevenson Table III
 
-
+#%%
 Earth = Planet( [ CoreLayer( 0.0, Stevenson_E1.R_c0, params=Stevenson_E1) , MantleLayer( Stevenson_E1.R_c0, Stevenson_E1.R_p0, params=Stevenson_E1) ] )
-
-T_cmb_initial = 5500.
+#%%
+T_cmb_initial = 3500.
 T_mantle_initial = 1500.
 Earth_age_yr = 4.568e9*365.25*24.*3600.
 times = np.linspace(0., Earth_age_yr, 100)
