@@ -61,7 +61,7 @@ class Planet(object):
             dTmantle_dt = self.mantle_layer.mantle_energy_balance( t, temperatures[1], temperatures[0] )
             cmb_flux = self.mantle_layer.lower_boundary_flux( temperatures[1], temperatures[0] )
             dTcore_dt = self.core_layer.core_energy_balance(temperatures[0], cmb_flux )
-            print('\n\n time={0:.2f} Mya'.format(t/(np.pi*1e7*1e6)))
+            # print('\n\n time={0:.2f} Mya'.format(t/(np.pi*1e7*1e6)))
             return np.array([dTcore_dt, dTmantle_dt])
 
         solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_mantle_initial]), times)
@@ -205,7 +205,7 @@ class MantleLayer(Layer):
         T_lower_mantle = self.lower_mantle_temperature(T_upper_mantle)
         upper_boundary_delta_T = T_upper_mantle - self.params.T_s
         lower_boundary_delta_T = T_cmb - T_lower_mantle
-        print("udT={0:.1f} K, ldT={1:.1f} K, nu={2:.2e} m^2/s".format(upper_boundary_delta_T, lower_boundary_delta_T, nu))
+        # print("udT={0:.1f} K, ldT={1:.1f} K, nu={2:.2e} m^2/s".format(upper_boundary_delta_T, lower_boundary_delta_T, nu))
         assert upper_boundary_delta_T > 0.0
         assert lower_boundary_delta_T > 0.0
         delta_T_effective = upper_boundary_delta_T + lower_boundary_delta_T
@@ -223,7 +223,7 @@ class MantleLayer(Layer):
         Use Equations (18,19) from Stevenson et al 1983 
         '''
         Ra = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
-        print("Ra={0:.2e}".format(Ra))
+        # print("Ra={0:.2e}".format(Ra))
         return self.boundary_layer_thickness(Ra)
     
     def lower_boundary_layer_thickness(self, T_upper_mantle, T_cmb):
@@ -235,13 +235,13 @@ class MantleLayer(Layer):
         delta_T_lower_boundary_layer = T_cmb - T_lower_mantle
         average_boundary_layer_temp = T_lower_mantle + delta_T_lower_boundary_layer/2.
         nu_crit = self.kinematic_viscosity(T_upper_mantle)
-        print('T_cmb={0:.1f} K, T_lm={1:.1f} K, T_um={2:.1f} K, T_lbl={3:.1f} K'.format(T_cmb, T_lower_mantle, T_upper_mantle, average_boundary_layer_temp))
+        # print('T_cmb={0:.1f} K, T_lm={1:.1f} K, T_um={2:.1f} K, T_lbl={3:.1f} K'.format(T_cmb, T_lower_mantle, T_upper_mantle, average_boundary_layer_temp))
         # import ipdb; ipdb.set_trace()
         assert delta_T_lower_boundary_layer > 0.0, "{0:.1f}, {1:.1f}, {2:.1f}".format(T_cmb, T_lower_mantle, T_upper_mantle)
         delta_c = np.power( pm.Ra_boundary_crit*nu_crit*pm.K/(pm.g*pm.alpha*delta_T_lower_boundary_layer), 0.333 )
         Ra_mantle = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
         delta_c_normal = self.boundary_layer_thickness(Ra_mantle)
-        print('LBLT normal = {0:.1f} km, LBLT inc. visc={1:.1f} km'.format(delta_c_normal/1e3, delta_c/1e3))
+        # print('LBLT normal = {0:.1f} km, LBLT inc. visc={1:.1f} km'.format(delta_c_normal/1e3, delta_c/1e3))
         return np.minimum(delta_c,  delta_c_normal)
         # return self.boundary_layer_thickness(Ra_mantle)
 
@@ -256,7 +256,7 @@ class MantleLayer(Layer):
         pm = self.params.mantle
         delta_T = T_upper_mantle - self.params.T_s
         upper_boundary_layer_thickness = self.upper_boundary_layer_thickness(T_upper_mantle, T_cmb)
-        print("uBLt = {0:.1f} km".format(upper_boundary_layer_thickness/1e3))
+        # print("uBLt = {0:.1f} km".format(upper_boundary_layer_thickness/1e3))
         return pm.k*delta_T/upper_boundary_layer_thickness
 
     def lower_boundary_flux(self, T_upper_mantle, T_cmb):
@@ -270,7 +270,7 @@ class MantleLayer(Layer):
         pm = self.params.mantle
         delta_T = T_cmb - self.lower_mantle_temperature(T_upper_mantle)
         lower_boundary_layer_thickness = self.lower_boundary_layer_thickness(T_upper_mantle, T_cmb)
-        print("LBLt = {0:.1f} km".format(lower_boundary_layer_thickness/1e3))
+        # print("LBLt = {0:.1f} km".format(lower_boundary_layer_thickness/1e3))
         return pm.k*delta_T/lower_boundary_layer_thickness
 
     def mantle_energy_balance(self, time, T_upper_mantle, T_cmb):
@@ -284,9 +284,9 @@ class MantleLayer(Layer):
         surface_flux = self.upper_boundary_flux(T_upper_mantle, T_cmb)
         net_flux_out = mantle_surface_area*surface_flux - core_surface_area*cmb_flux
         # net_flux_out = mantle_surface_area*surface_flux
-        print('CMB flux={0:.1f} TW, Surf flux={1:.1f} TW, net flux out={2:.1f} TW'.format(cmb_flux*core_surface_area/1e12, mantle_surface_area*surface_flux/1e12, net_flux_out/1e12))
+        # print('CMB flux={0:.1f} TW, Surf flux={1:.1f} TW, net flux out={2:.1f} TW'.format(cmb_flux*core_surface_area/1e12, mantle_surface_area*surface_flux/1e12, net_flux_out/1e12))
         dTdt = (internal_heat_energy - net_flux_out)/effective_heat_capacity
-        print('heat={0:.1f}TW, effective heat capacity = {1:.1f}'.format(internal_heat_energy/1e12, effective_heat_capacity/1e24))
+        # print('heat={0:.1f}TW, effective heat capacity = {1:.1f}'.format(internal_heat_energy/1e12, effective_heat_capacity/1e24))
         return dTdt
 
     def ODE( self, T_u_initial, T_cmb ):
