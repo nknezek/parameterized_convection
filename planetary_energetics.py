@@ -7,42 +7,6 @@ import scipy.integrate as integrate
 import scipy.optimize as opt
 from scipy.misc import derivative
 
-class Layer(object):
-    '''
-    The layer base class defines the geometry of a spherical shell within
-    a planet.
-    '''
-
-    def __init__( self, inner_radius, outer_radius, params={}):
-        self.inner_radius = inner_radius
-        self.outer_radius = outer_radius
-        self.thickness = outer_radius-inner_radius
-
-        assert self.thickness > 0.0
-
-        self.inner_surface_area = 4.0 * np.pi * self.inner_radius**2.
-        self.outer_surface_area = 4.0 * np.pi * self.outer_radius**2.
-
-        self.volume = 4.0/3.0 * np.pi * ( self.outer_radius**3. - self.inner_radius**3.)
-        self.params = params
-
-    def set_boundary_temperatures(self,outer_temperature,inner_temperature): 
-        '''
-        All layers should be able to track the temperatures of the their outer and inner
-        boundary.
-        '''
-        self.outer_temperature = outer_temperature
-        self.inner_temperature = inner_temperature
-
-    def ODE(y, t):
-        raise NotImplementedError("Need to define an ODE")
-
-    def lower_heat_flux_attempt (self):
-        raise NotImplementedError("Need to define a heat flux function")
-
-    def upper_heat_flux_attempt (self):
-        raise NotImplementedError("Need to define a heat flux function")
-
 class Planet(object):
 
     def __init__( self, layers):
@@ -53,18 +17,40 @@ class Planet(object):
         self.volume = 4./3. * np.pi * self.radius**3
 
         self.core_layer = layers[0]
-        self.mantle_layer = layers[1]
+        self.magma_ocean_layer = layers[1]
+        self.mantle_layer = layers[2]
+        self.core_layer.planet = self
+        self.magma_ocean_layer.planet = self
+        self.mantle_layer.planet = self
+        print("R_p={0:.1f} km, R_mo={1:.1f} km, R_c={2:.1f} km".format(self.mantle_layer.outer_radius, self.magma_ocean_layer.outer_radius, self.core_layer.outer_radius))
 
-    def integrate( self, T_cmb_initial, T_mantle_initial, times):
+    def integrate( self, T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times):
         
-        def ODE( temperatures, t ):
-            dTmantle_dt = self.mantle_layer.mantle_energy_balance( t, temperatures[1], temperatures[0] )
-            cmb_flux = self.mantle_layer.lower_boundary_flux( temperatures[1], temperatures[0] )
-            dTcore_dt = self.core_layer.core_energy_balance(temperatures[0], cmb_flux )
-            # print('\n\n time={0:.2f} Mya'.format(t/(np.pi*1e7*1e6)))
-            return np.array([dTcore_dt, dTmantle_dt])
+        def ODE( values, t ):
+            P_mo = self.magma_ocean_layer.calculate_pressure_magma_ocean_top()
+            T_liq = self.magma_ocean_layer.calculate_liquidous_temp(P_mo)
+            T_sol = self.magma_ocean_layer.calculate_solidus_temp(P_mo)
+            Dlbl_mo = self.magma_ocean_layer.lower_boundary_layer_thickness(values[1], values[0])
+            T_lmo = self.magma_ocean_layer.lower_temperature(values[1])
+            print("\ntime={0:.4f} Myr".format(t/(365.25*24.*3600.*1e6)))
+            print("T_cmb={0:.1f} K".format(values[0]))
+            print("T_lower_mo={0:.1f} K, D_lbl_mo={1:.3f} m".format(T_lmo, Dlbl_mo))
+            print("T_upper_mo = {0:.1f} K, T_liq = {1:.1f} K, T_sol={2:.1f} K, D = {3:.1f} km".format(values[1], T_liq, T_sol, self.magma_ocean_layer.thickness/1e3))
+            print("T_lower_mantle={0:.1f} K".format(self.mantle_layer.lower_mantle_temperature(values[2])))
+            print("T_upper_mantle={0:.1f} K".format(values[2]))
 
-        solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_mantle_initial]), times)
+            dTmantle_dt = self.mantle_layer.mantle_energy_balance( values[2], values[1], t )
+            mantle_bottom_flux = self.mantle_layer.lower_boundary_flux( values[2], values[1] )
+            dTmagmaocean_dt = self.magma_ocean_layer.magma_ocean_energy_balance(values[1], values[0], mantle_bottom_flux, t)
+            magma_ocean_bottom_flux = self.magma_ocean_layer.lower_boundary_flux(values[1], values[0], mantle_bottom_flux)
+            dTcore_dt = self.core_layer.core_energy_balance(values[0], magma_ocean_bottom_flux)
+            self.magma_ocean_layer.update_boundary_location(values[1])
+            print("mantle flux={0:.3f} W/m^2".format(mantle_bottom_flux))
+            print("magma ocean flux={0:.3f} W/m^2".format(magma_ocean_bottom_flux))
+
+            return np.array([dTcore_dt, dTmagmaocean_dt, dTmantle_dt])
+
+        solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_magma_ocean_initial, T_mantle_initial]), times)
         return times, solution
 
     def draw(self):
@@ -87,9 +73,48 @@ class Planet(object):
         plt.axis('off')
         plt.show()
 
+class Layer(object):
+    '''
+    The layer base class defines the geometry of a spherical shell within
+    a planet.
+    '''
+
+    def __init__( self, inner_radius, outer_radius, params={}):
+        self.set_boundaries(inner_radius, outer_radius)
+        self.params = params
+
+    def set_boundaries(self, inner_radius, outer_radius):
+        self.inner_radius = inner_radius
+        self.outer_radius = outer_radius
+        self.thickness = outer_radius-inner_radius
+
+        assert self.thickness >= 0.0, "Ri={0:.1f} km, Ro={1:.1f} km".format(self.inner_radius/1e3, self.outer_radius/1e3)
+
+        self.inner_surface_area = 4.0 * np.pi * self.inner_radius**2.
+        self.outer_surface_area = 4.0 * np.pi * self.outer_radius**2.
+
+        self.volume = 4.0/3.0 * np.pi * ( self.outer_radius**3. - self.inner_radius**3.)
+
+    def set_boundary_temperatures(self,outer_temperature,inner_temperature):
+        '''
+        All layers should be able to track the temperatures of the their outer and inner
+        boundary.
+        '''
+        self.outer_temperature = outer_temperature
+        self.inner_temperature = inner_temperature
+
+    def ODE(y, t):
+        raise NotImplementedError("Need to define an ODE")
+
+    def lower_heat_flux_attempt (self):
+        raise NotImplementedError("Need to define a heat flux function")
+
+    def upper_heat_flux_attempt (self):
+        raise NotImplementedError("Need to define a heat flux function")
+
 class CoreLayer(Layer):
-    def __init__(self,inner_radius,outer_radius, params={}):
-        Layer.__init__(self,inner_radius,outer_radius, params)
+    def __init__(self, inner_radius, outer_radius, params={}):
+        Layer.__init__(self, inner_radius, outer_radius, params)
         self.light_alloy = self.params.core.x_0
 
     def set_light_alloy_concentration(self):
@@ -160,13 +185,160 @@ class CoreLayer(Layer):
         except ValueError:
             pass
         thermal_energy_change = pc.rho*pc.C*self.volume*pc.mu
-        # latent_heat = -pc.L_Eg * pc.rho * inner_core_surface_area * dRi_dTcmb
-        # dTdt = -core_flux * core_surface_area / (thermal_energy_change-latent_heat)
-        dTdt = -core_flux * core_surface_area / (thermal_energy_change)
+        latent_heat = -pc.L_Eg * pc.rho * inner_core_surface_area * dRi_dTcmb
+        dTdt = -core_flux * core_surface_area / (thermal_energy_change-latent_heat)
         return dTdt
 
     def ODE( self, T_cmb_initial, cmb_flux ):
         dTdt = lambda x, t : self.core_energy_balance( x, cmb_flux )
+        return dTdt
+
+class MagmaOceanLayer(Layer):
+    def __init__(self,inner_radius,outer_radius, params={}):
+        Layer.__init__(self,inner_radius,outer_radius, params)
+
+    def lower_temperature(self, T_magma_ocean):
+        '''
+        Adiabatic Temperature Increase from the temperature at the base of upper mantle boundary layer to
+        the top of the lower boundary layer assuming negligable boundary layer thickness.
+        '''
+        po = self.params.magma_ocean
+        return T_magma_ocean*( 1.0 + po.alpha*po.g*self.thickness/po.C)
+
+    def rayleigh_number(self, T_upper, T_lower):
+        '''
+
+        :param T_mantle_bottom:
+        :param T_lower:
+        :return:
+        '''
+        po = self.params.magma_ocean
+        T_avg = (T_upper + T_lower)/2
+        delta_T = T_lower-T_upper
+        assert delta_T >= 0., 'dT={0:.1f} K'.format(delta_T)
+        return po.g*po.alpha*delta_T*np.power(self.thickness,3.)/(po.nu*po.K)
+        pass
+
+    def calculate_solidus_temp(self, P):
+        po = self.params.magma_ocean
+        return po.c1_sol*(P/po.c2_sol + 1)**(1/po.c3_sol)
+
+    def calculate_liquidous_temp(self, P):
+        po = self.params.magma_ocean
+        return po.c1_liq*(P/po.c2_liq + 1)**(1/po.c3_liq)
+
+    def calculate_pressure_magma_ocean_top(self):
+        '''
+        Calculates the pressure at the top of the magma ocean using the pressure at the CMB and rho*g*thickness
+        :return:
+        '''
+        po = self.params.magma_ocean
+        return self.params.core.P_c - self.thickness*po.rho*po.g
+
+    def calculate_solidification_fraction(self, T_magma_ocean):
+        '''
+        Calculates the fraction of the layer that solidifies assuming a uniform layer temperature and a linear phase diagram
+
+        :param T:
+        :return:
+        '''
+        P_mo = self.calculate_pressure_magma_ocean_top()
+        T_sol = self.calculate_solidus_temp(P_mo)
+        T_liq = self.calculate_liquidous_temp(P_mo)
+        if T_magma_ocean < T_sol:
+            return 1.0
+        elif T_magma_ocean > T_liq:
+            return 0.0
+        else:
+            return 1.-(T_magma_ocean-T_sol)/(T_liq-T_sol)
+
+    def calculate_thickness_change(self, T_magma_ocean):
+        sol_frac = self.calculate_solidification_fraction(T_magma_ocean)
+        new_volume = self.volume*(1-sol_frac)
+        new_thickness = (3*new_volume/(4*np.pi) + self.inner_radius**3.)**(1./3.) - self.inner_radius
+        # print("T_mo={0:.1f} K, Sol\%={1:.5f}".format(T_magma_ocean, sol_frac))
+        return new_thickness-self.thickness
+
+    def update_boundary_location(self, T_magma_ocean):
+        new_thickness = max(self.calculate_thickness_change(T_magma_ocean)+self.thickness, 0.0)
+        self.set_boundaries(self.inner_radius, self.inner_radius+new_thickness)
+        self.planet.mantle_layer.set_boundaries(self.outer_radius, self.planet.mantle_layer.outer_radius)
+
+    def heat_production(self, time):
+        '''
+        Equation (2) from Stevenson et al 1983
+        '''
+        po = self.params.magma_ocean
+        return po.Q_0*np.exp(-po.lam*time)
+
+    def calculate_latent_heat(self, T_magma_ocean):
+        po = self.params.magma_ocean
+        P_mo = self.calculate_pressure_magma_ocean_top()
+        T_sol = self.calculate_liquidous_temp(P_mo)
+        T_liq = self.calculate_solidus_temp(P_mo)
+        if T_magma_ocean > T_liq and T_magma_ocean < T_sol:
+            latent_heat = po.L_Eg*po.rho*self.volume/(T_liq-T_sol)
+        else:
+            latent_heat = 0.
+        return latent_heat
+
+    def boundary_layer_thickness(self, Ra):
+        '''
+        Equation (18) Stevenson et al 1983
+        '''
+        po = self.params.magma_ocean
+        if Ra > 0.:
+            return self.thickness*np.power(po.Ra_crit/Ra, po.beta)
+        else:
+            return self.thickness
+
+    def lower_boundary_layer_thickness(self, T_magma_ocean, T_cmb):
+        '''
+        Equations (20,21) Stevenson et al 1983
+        '''
+        po = self.params.magma_ocean
+        T_lower = self.lower_temperature(T_magma_ocean)
+        delta_T_lower_boundary_layer = T_cmb - T_lower
+        assert delta_T_lower_boundary_layer > 0.0, "dTlbl_mo={0:.1f} K, Tl_mo={1:.1f} K, Tcmb={2:.1f} K".format(delta_T_lower_boundary_layer, T_lower, T_cmb)
+        Ra = self.rayleigh_number(T_magma_ocean, T_lower)
+        delta = self.boundary_layer_thickness(Ra)
+        # print("Ra={0:.3e}, dTlbl={1:.3} K, delta={2:.3f} m".format(Ra, delta_T_lower_boundary_layer, delta))
+        return delta
+
+    def lower_boundary_flux(self, T_magma_ocean, T_cmb, mantle_bottom_flux):
+        '''
+        Equation (17) from Stevenson et al 1983
+
+        :param T_upper_mantle:
+        :param T_mantle_bottom:
+        :return:
+        '''
+        po = self.params.magma_ocean
+        lower_boundary_layer_thickness = self.lower_boundary_layer_thickness(T_magma_ocean, T_cmb)
+        if self.thickness > lower_boundary_layer_thickness:
+            T_lower = self.lower_temperature(T_magma_ocean)
+            delta_T = T_cmb - T_lower
+            assert delta_T > 0., "dT={0:.1f} K".format(delta_T)
+            return po.k*delta_T/lower_boundary_layer_thickness
+        else:
+            return mantle_bottom_flux
+
+    def magma_ocean_energy_balance(self, T_magma_ocean, T_cmb, mantle_bottom_flux, time):
+        po = self.params.magma_ocean
+        lower_boundary_layer_thickness = self.lower_boundary_layer_thickness(T_magma_ocean, T_cmb)
+        if self.thickness > lower_boundary_layer_thickness:
+            latent_heat = self.calculate_latent_heat(T_magma_ocean)
+            effective_heat_capacity = po.rho*po.C*po.mu*self.volume
+            internal_heat_energy = self.heat_production(time)*self.volume
+            cmb_flux = self.lower_boundary_flux(T_magma_ocean, T_cmb, mantle_bottom_flux)
+            net_flux_out = self.outer_surface_area*mantle_bottom_flux - self.inner_surface_area*cmb_flux
+            dTdt = (internal_heat_energy - net_flux_out)/(effective_heat_capacity + latent_heat)
+        else:
+            dTdt = self.planet.core_layer.core_energy_balance(T_cmb, mantle_bottom_flux)
+        return dTdt
+
+    def ODE( self, D_magma_ocean_initial, T_mag):
+        dDdt = lambda x, t : self.magma_ocean_energy_balance( x, )
         return dTdt
 
 class MantleLayer(Layer):
@@ -196,7 +368,7 @@ class MantleLayer(Layer):
         pm = self.params.mantle
         return T_upper_mantle*( 1.0 + pm.alpha*pm.g*self.thickness/pm.C)
     
-    def mantle_rayleigh_number(self, T_upper_mantle, T_cmb):
+    def mantle_rayleigh_number(self, T_upper_mantle, T_mantle_bottom):
         '''
         Equation (19) Stevenson et al 1983
         '''
@@ -204,8 +376,7 @@ class MantleLayer(Layer):
         nu = self.kinematic_viscosity(T_upper_mantle)
         T_lower_mantle = self.lower_mantle_temperature(T_upper_mantle)
         upper_boundary_delta_T = T_upper_mantle - self.params.T_s
-        lower_boundary_delta_T = T_cmb - T_lower_mantle
-        # print("udT={0:.1f} K, ldT={1:.1f} K, nu={2:.2e} m^2/s".format(upper_boundary_delta_T, lower_boundary_delta_T, nu))
+        lower_boundary_delta_T = T_mantle_bottom - T_lower_mantle
         assert upper_boundary_delta_T > 0.0
         assert lower_boundary_delta_T > 0.0
         delta_T_effective = upper_boundary_delta_T + lower_boundary_delta_T
@@ -218,70 +389,69 @@ class MantleLayer(Layer):
         pm = self.params.mantle
         return self.thickness*np.power(pm.Ra_crit/Ra, pm.beta)
 
-    def upper_boundary_layer_thickness(self, T_upper_mantle, T_cmb):
+    def upper_boundary_layer_thickness(self, T_upper_mantle, T_mantle_bottom):
         '''
         Use Equations (18,19) from Stevenson et al 1983 
         '''
-        Ra = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
-        # print("Ra={0:.2e}".format(Ra))
+        Ra = self.mantle_rayleigh_number(T_upper_mantle, T_mantle_bottom)
         return self.boundary_layer_thickness(Ra)
     
-    def lower_boundary_layer_thickness(self, T_upper_mantle, T_cmb):
+    def lower_boundary_layer_thickness(self, T_upper_mantle, T_mantle_bottom):
         '''
         Equations (20,21) Stevenson et al 1983
         '''
         pm = self.params.mantle
         T_lower_mantle = self.lower_mantle_temperature(T_upper_mantle)
-        delta_T_lower_boundary_layer = T_cmb - T_lower_mantle
+        delta_T_lower_boundary_layer = T_mantle_bottom - T_lower_mantle
         average_boundary_layer_temp = T_lower_mantle + delta_T_lower_boundary_layer/2.
         nu_crit = self.kinematic_viscosity(T_upper_mantle)
-        # print('T_cmb={0:.1f} K, T_lm={1:.1f} K, T_um={2:.1f} K, T_lbl={3:.1f} K'.format(T_cmb, T_lower_mantle, T_upper_mantle, average_boundary_layer_temp))
+        # print('T_mantle_bottom={0:.1f} K, T_lm={1:.1f} K, T_um={2:.1f} K, T_lbl={3:.1f} K'.format(T_mantle_bottom, T_lower_mantle, T_upper_mantle, average_boundary_layer_temp))
         # import ipdb; ipdb.set_trace()
-        assert delta_T_lower_boundary_layer > 0.0, "{0:.1f}, {1:.1f}, {2:.1f}".format(T_cmb, T_lower_mantle, T_upper_mantle)
+        assert delta_T_lower_boundary_layer > 0.0, "dTlbl={3:.1f} K, T_mb={0:.1f} K, T_lm={1:.1f} K, T_um={2:.1f} K".format(T_mantle_bottom, T_lower_mantle, T_upper_mantle, delta_T_lower_boundary_layer)
         delta_c = np.power( pm.Ra_boundary_crit*nu_crit*pm.K/(pm.g*pm.alpha*delta_T_lower_boundary_layer), 0.333 )
-        Ra_mantle = self.mantle_rayleigh_number(T_upper_mantle, T_cmb)
+        Ra_mantle = self.mantle_rayleigh_number(T_upper_mantle, T_mantle_bottom)
         delta_c_normal = self.boundary_layer_thickness(Ra_mantle)
         # print('LBLT normal = {0:.1f} km, LBLT inc. visc={1:.1f} km'.format(delta_c_normal/1e3, delta_c/1e3))
         return np.minimum(delta_c,  delta_c_normal)
         # return self.boundary_layer_thickness(Ra_mantle)
 
-    def upper_boundary_flux(self, T_upper_mantle, T_cmb):
+    def upper_boundary_flux(self, T_upper_mantle, T_mantle_bottom):
         '''
         Equation (17) from Stevenson et al 1983
 
         :param T_upper_mantle:
-        :param T_cmb:
+        :param T_mantle_bottom:
         :return:
         '''
         pm = self.params.mantle
         delta_T = T_upper_mantle - self.params.T_s
-        upper_boundary_layer_thickness = self.upper_boundary_layer_thickness(T_upper_mantle, T_cmb)
+        upper_boundary_layer_thickness = self.upper_boundary_layer_thickness(T_upper_mantle, T_mantle_bottom)
         # print("uBLt = {0:.1f} km".format(upper_boundary_layer_thickness/1e3))
         return pm.k*delta_T/upper_boundary_layer_thickness
 
-    def lower_boundary_flux(self, T_upper_mantle, T_cmb):
+    def lower_boundary_flux(self, T_upper_mantle, T_mantle_bottom):
         '''
         Equation (17) from Stevenson et al 1983
 
         :param T_upper_mantle:
-        :param T_cmb:
+        :param T_mantle_bottom:
         :return:
         '''
         pm = self.params.mantle
-        delta_T = T_cmb - self.lower_mantle_temperature(T_upper_mantle)
-        lower_boundary_layer_thickness = self.lower_boundary_layer_thickness(T_upper_mantle, T_cmb)
+        delta_T = T_mantle_bottom - self.lower_mantle_temperature(T_upper_mantle)
+        lower_boundary_layer_thickness = self.lower_boundary_layer_thickness(T_upper_mantle, T_mantle_bottom)
         # print("LBLt = {0:.1f} km".format(lower_boundary_layer_thickness/1e3))
         return pm.k*delta_T/lower_boundary_layer_thickness
 
-    def mantle_energy_balance(self, time, T_upper_mantle, T_cmb):
+    def mantle_energy_balance(self, T_upper_mantle, T_mantle_bottom, time):
         pm = self.params.mantle
         mantle_surface_area = self.outer_surface_area
         core_surface_area   = self.inner_surface_area
 
         effective_heat_capacity = pm.rho*pm.C*pm.mu*self.volume
         internal_heat_energy = self.heat_production(time)*self.volume
-        cmb_flux = self.lower_boundary_flux(T_upper_mantle, T_cmb)
-        surface_flux = self.upper_boundary_flux(T_upper_mantle, T_cmb)
+        cmb_flux = self.lower_boundary_flux(T_upper_mantle, T_mantle_bottom)
+        surface_flux = self.upper_boundary_flux(T_upper_mantle, T_mantle_bottom)
         net_flux_out = mantle_surface_area*surface_flux - core_surface_area*cmb_flux
         # net_flux_out = mantle_surface_area*surface_flux
         # print('CMB flux={0:.1f} TW, Surf flux={1:.1f} TW, net flux out={2:.1f} TW'.format(cmb_flux*core_surface_area/1e12, mantle_surface_area*surface_flux/1e12, net_flux_out/1e12))
@@ -289,8 +459,8 @@ class MantleLayer(Layer):
         # print('heat={0:.1f}TW, effective heat capacity = {1:.1f}'.format(internal_heat_energy/1e12, effective_heat_capacity/1e24))
         return dTdt
 
-    def ODE( self, T_u_initial, T_cmb ):
-        dTdt = lambda x, t : self.mantle_energy_balance( t, x, T_cmb )
+    def ODE( self, T_u_initial, T_mantle_bottom ):
+        dTdt = lambda x, t : self.mantle_energy_balance( t, x, T_mantle_bottom )
         return dTdt
 
 class Parameters(object):
@@ -344,15 +514,69 @@ Stevenson_E2 = copy.deepcopy(Stevenson)
 Stevenson_E2.core.L_Eg = 2e6 # - [J/kg] from Stevenson Table III
 Stevenson_E2.core.T_m0 = 1980. # - [K] from Stevenson Table III
 
-#%%
-Earth = Planet( [ CoreLayer( 0.0, Stevenson_E1.R_c0, params=Stevenson_E1) , MantleLayer( Stevenson_E1.R_c0, Stevenson_E1.R_p0, params=Stevenson_E1) ] )
-#%%
-T_cmb_initial = 5500.
-T_mantle_initial = 3100.
-Earth_age_yr = 4350e6*365.25*24.*3600.
-times = np.linspace(0., Earth_age_yr, 1000)
+Stevenson_E3 = copy.deepcopy(Stevenson)
+Stevenson_E3.core.L_Eg = 1e6 # - [J/kg] from Stevenson Table III
+Stevenson_E3.core.T_m0 = 1980. # - [K] from Stevenson Table III
 
-t, y = Earth.integrate(T_cmb_initial, T_mantle_initial, times)
-plt.plot( t, y[:,0])
-plt.plot( t, y[:,1])
+Stevenson_E4 = copy.deepcopy(Stevenson)
+Stevenson_E4.core.L_Eg = 2e6 # - [J/kg] from Stevenson Table III
+Stevenson_E4.core.T_m0 = 2030. # - [K] from Stevenson Table III
+
+Andrault = copy.deepcopy(Stevenson_E1)
+
+Andrault.D_mo0 = 500e3 # - [km] initial thickness of magma ocean guess
+Andrault.R_mo0 = Andrault.R_c0 + Andrault.D_mo0
+
+Andrault.magma_ocean = Parameters('From Stevenson E1 and Andrault')
+Andrault.magma_ocean.c1_sol = 2081.8 # - [K] from Moneteux 2016 (12) citing Andrault 2011
+Andrault.magma_ocean.c2_sol = 101.69e9 # - [Pa] from Moneteux 2016 (12) citing Andrault 2011
+Andrault.magma_ocean.c3_sol = 1.226 # - [] from Moneteux 2016 (12) citing Andrault 2011
+Andrault.magma_ocean.alpha = 2e-5 # - [/K] from Stevenson Table I for mantle
+Andrault.magma_ocean.k = 4.0 # - [W/m-K] from Stevenson Table I for mantle
+Andrault.magma_ocean.K = 1e-6 # - [m^2/s] from Stevenson Table I for mantle
+Andrault.magma_ocean.rhoC = 4e6 # - [J/m^3-K] from Stevenson Table I for mantle
+Andrault.magma_ocean.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
+Andrault.magma_ocean.C = Andrault.magma_ocean.rhoC/Andrault.magma_ocean.rho # - [J/K-kg]
+Andrault.magma_ocean.L_Eg = 3e5 # - [J/kg] guess
+Andrault.magma_ocean.Q_0 = 0.
+Andrault.magma_ocean.lam = 1.38e-17 # - [1/s] from Stevenson Table I
+Andrault.magma_ocean.g = Stevenson.g # - [m/s^2] from Stevenson Table II
+Andrault.magma_ocean.nu = 1e-1 # - [m^2/s] -- estimate
+Andrault.magma_ocean.mu = 1. # - [] -- ratio of average layer temperature to T_magma_ocean at top estimate
+Andrault.magma_ocean.Ra_crit = 5e2 # - [] from Stevenson Table I
+Andrault.magma_ocean.Ra_boundary_crit = 2e3 # empirical parameter
+Andrault.magma_ocean.beta = 0.3 # - [] from Stevenson Table I
+
+Andrault_f_peridotitic = copy.deepcopy(Andrault)
+Andrault_f_peridotitic.magma_ocean.c1_liq = 78.74 # - [K] from Moneteux 2016 (13) citing Andrault 2011
+Andrault_f_peridotitic.magma_ocean.c2_liq = 4.054e6 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
+Andrault_f_peridotitic.magma_ocean.c3_liq = 2.44 # - [] from Moneteux 2016 (13) citing Andrault 2011
+
+Andrault_a_chondritic = copy.deepcopy(Andrault)
+Andrault_a_chondritic.magma_ocean.c1_liq = 2006.8 # - [K] from Moneteux 2016 (13) citing Andrault 2011
+Andrault_a_chondritic.magma_ocean.c2_liq = 34.65e9 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
+Andrault_a_chondritic.magma_ocean.c3_liq = 1.844 # - [] from Moneteux 2016 (13) citing Andrault 2011
+
+
+
+#%%
+Earth = Planet( [ CoreLayer( 0.0, Andrault_f_peridotitic.R_c0, params=Andrault_f_peridotitic) ,
+                  MagmaOceanLayer(Andrault_f_peridotitic.R_c0, Andrault_f_peridotitic.R_mo0, params=Andrault_f_peridotitic),
+                  MantleLayer(Andrault_f_peridotitic.R_mo0, Andrault_f_peridotitic.R_p0, params=Andrault_f_peridotitic) ] )
+#%%
+T_cmb_initial = 9580.
+T_magma_ocean_initial = 8500.
+T_mantle_initial = 4500.
+end_time = 4e6*365.25*24.*3600.
+
+Nt = 3000
+times = np.linspace(0., end_time, Nt)
+D_magma_ocean_initial = Andrault_f_peridotitic.D_mo0
+t, y = Earth.integrate(T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times)
+t_plt = t/(365.25*24.*3600.*1e6)
+t_pltind = Nt
+plt.plot( t_plt[:t_pltind], y[:t_pltind,0])
+plt.plot( t_plt[:t_pltind], y[:t_pltind,1])
+plt.plot( t_plt[:t_pltind], y[:t_pltind,2])
+# plt.plot( t/(np.pi*1e7), y[:,3])
 plt.show()
