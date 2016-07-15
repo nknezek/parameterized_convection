@@ -5,7 +5,7 @@ import numpy as np
 # ------------------------------------------------------ #
 
 # Table I
-alpha = 2e4 # - K
+alpha = 2e6 # - K
 k = 4.0 # - W/m-K
 K = 1e6 # - m^2/s
 rho_mantle_C_mantle = 4.0e6 # - J/m^3 K
