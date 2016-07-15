@@ -8,7 +8,7 @@ class Parameters(object):
         pass
 
 class Stevenson_1983(Parameters) :
-    def __init__(self):
+    def __init__(self, case):
         self.source = 'Stevenson_1983'
         self.R_p0 = 6371e3 # - [m] from self Table II
         self.R_c0 = 3485e3 # - [m] from self pg. 474
@@ -45,15 +45,17 @@ class Stevenson_1983(Parameters) :
         self.core.T_m2 = -4.5e-24 # - [K/Pa^2] from self Table II
         self.core.T_a1 = 3.96e-12 # - [K/Pa] from self Table II
         self.core.T_a2 = -3.3e-24 # - [K/Pa^2] from self Table II
+        self.set_inner_core_L_Eg(case)
 
     def set_inner_core_L_Eg(self,case):
             if case ==1 :
                 self.core.L_Eg = 1e6 # - [J/kg] from self Table III
                 self.core.T_m0 = 1950. # - [K] from self Table III
-            if case ==2 :
+            elif case ==2 :
                 self.core.L_Eg = 2e6 # - [J/kg] from self Table III
                 self.core.T_m0 = 1980. # - [K] from self Table III
-
+            else:
+                raise ValueError("case must be integer 1 for E1 or 2 for E2")
 
 class Driscoll_2014(Parameters) :
     def __init__(self):
@@ -105,3 +107,79 @@ class Driscoll_2014(Parameters) :
         self.core.lam = 1./1.2/const_yr_to_sec/1e9 # - [1/s] from self Table III
         self.core.Q_0_up = 1.133e-9 # - [W/m^3] from Pg 41
         self.core.Q_0_low = 6.798e-9 # - [W/m^3] from Pg 41
+
+class Andrault_2011_Stevenson(Stevenson_1983):
+    def __init__(self, composition, Stevenson_case):
+        Stevenson_1983.__init__(self, Stevenson_case)
+        self.D_mo0 = 500e3 # - [km] initial thickness of magma ocean guess
+        self.R_mo0 = self.R_c0 + self.D_mo0
+        self.magma_ocean = Parameters('From Stevenson E1 and Andrault')
+        self.magma_ocean.c1_sol = 2081.8 # - [K] from Moneteux 2016 (12) citing Andrault 2011
+        self.magma_ocean.c2_sol = 101.69e9 # - [Pa] from Moneteux 2016 (12) citing Andrault 2011
+        self.magma_ocean.c3_sol = 1.226 # - [] from Moneteux 2016 (12) citing Andrault 2011
+        self.magma_ocean.alpha = 2e-5 # - [/K] from Stevenson Table I for mantle
+        self.magma_ocean.k = 4.0 # - [W/m-K] from Stevenson Table I for mantle
+        self.magma_ocean.K = 1e-6 # - [m^2/s] from Stevenson Table I for mantle
+        self.magma_ocean.rhoC = 4e6 # - [J/m^3-K] from Stevenson Table I for mantle
+        self.magma_ocean.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
+        self.magma_ocean.C = self.magma_ocean.rhoC/self.magma_ocean.rho # - [J/K-kg]
+        self.magma_ocean.L_Eg = 3e5 # - [J/kg] guess
+        self.magma_ocean.Q_0 = 1.7e-7 # - [W/m^3] from Stevenson Table I
+        self.magma_ocean.lam = 1.38e-17 # - [1/s] from Stevenson Table I
+        self.magma_ocean.g = self.g # - [m/s^2] from Stevenson Table II
+        self.magma_ocean.nu = 1e-1 # - [m^2/s] -- estimate
+        self.magma_ocean.mu = 1. # - [] -- ratio of average layer temperature to T_magma_ocean at top estimate
+        self.magma_ocean.Ra_crit = 5e2 # - [] from Stevenson Table I
+        self.magma_ocean.Ra_boundary_crit = 2e3 # empirical parameter
+        self.magma_ocean.beta = 0.3 # - [] from Stevenson Table I
+        self.set_composition(composition)
+
+    def set_composition(self, composition):
+        if composition == "f_perioditic":
+            self.magma_ocean.c1_liq = 78.74 # - [K] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c2_liq = 4.054e6 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c3_liq = 2.44 # - [] from Moneteux 2016 (13) citing Andrault 2011
+        elif composition == "a_chondritic":
+            self.magma_ocean.c1_liq = 2006.8 # - [K] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c2_liq = 34.65e9 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c3_liq = 1.844 # - [] from Moneteux 2016 (13) citing Andrault 2011
+        else:
+            raise ValueError("Composition for Andrault_2011 must be f_perioditic or a_chondrtic")
+
+class Andrault_2011_Driscoll(Driscoll_2014):
+    def __init__(self, composition, Stevenson_case):
+        Stevenson_1983.__init__(self, Stevenson_case)
+        self.D_mo0 = 500e3 # - [km] initial thickness of magma ocean guess
+        self.R_mo0 = self.R_c0 + self.D_mo0
+        self.magma_ocean = Parameters('From Stevenson E1 and Andrault')
+        self.magma_ocean.c1_sol = 2081.8 # - [K] from Moneteux 2016 (12) citing Andrault 2011
+        self.magma_ocean.c2_sol = 101.69e9 # - [Pa] from Moneteux 2016 (12) citing Andrault 2011
+        self.magma_ocean.c3_sol = 1.226 # - [] from Moneteux 2016 (12) citing Andrault 2011
+        self.magma_ocean.alpha = 2e-5 # - [/K] from Stevenson Table I for mantle
+        self.magma_ocean.k = 4.0 # - [W/m-K] from Stevenson Table I for mantle
+        self.magma_ocean.K = 1e-6 # - [m^2/s] from Stevenson Table I for mantle
+        self.magma_ocean.rhoC = 4e6 # - [J/m^3-K] from Stevenson Table I for mantle
+        self.magma_ocean.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
+        self.magma_ocean.C = self.magma_ocean.rhoC/self.magma_ocean.rho # - [J/K-kg]
+        self.magma_ocean.L_Eg = 3e5 # - [J/kg] guess
+        self.magma_ocean.Q_0 = 1.7e-7 # - [W/m^3] from Stevenson Table I
+        self.magma_ocean.lam = 1.38e-17 # - [1/s] from Stevenson Table I
+        self.magma_ocean.g = self.g # - [m/s^2] from Stevenson Table II
+        self.magma_ocean.nu = 1e-1 # - [m^2/s] -- estimate
+        self.magma_ocean.mu = 1. # - [] -- ratio of average layer temperature to T_magma_ocean at top estimate
+        self.magma_ocean.Ra_crit = 5e2 # - [] from Stevenson Table I
+        self.magma_ocean.Ra_boundary_crit = 2e3 # empirical parameter
+        self.magma_ocean.beta = 0.3 # - [] from Stevenson Table I
+        self.set_composition(composition)
+
+    def set_composition(self, composition):
+        if composition == "f_perioditic":
+            self.magma_ocean.c1_liq = 78.74 # - [K] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c2_liq = 4.054e6 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c3_liq = 2.44 # - [] from Moneteux 2016 (13) citing Andrault 2011
+        elif composition == "a_chondritic":
+            self.magma_ocean.c1_liq = 2006.8 # - [K] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c2_liq = 34.65e9 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
+            self.magma_ocean.c3_liq = 1.844 # - [] from Moneteux 2016 (13) citing Andrault 2011
+        else:
+            raise ValueError("Composition for Andrault_2011 must be f_perioditic or a_chondrtic")

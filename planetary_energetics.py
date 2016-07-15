@@ -6,6 +6,7 @@ import copy
 import scipy.integrate as integrate
 import scipy.optimize as opt
 from scipy.misc import derivative
+from input_parameters import *
 
 class Planet(object):
 
@@ -25,7 +26,8 @@ class Planet(object):
         print("R_p={0:.1f} km, R_mo={1:.1f} km, R_c={2:.1f} km".format(self.mantle_layer.outer_radius, self.magma_ocean_layer.outer_radius, self.core_layer.outer_radius))
 
     def integrate( self, T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times):
-        
+        self.D_mo = []
+        self.D_mo_t = []
         def ODE( values, t ):
             P_mo = self.magma_ocean_layer.calculate_pressure_magma_ocean_top()
             T_liq = self.magma_ocean_layer.calculate_liquidous_temp(P_mo)
@@ -45,12 +47,15 @@ class Planet(object):
             magma_ocean_bottom_flux = self.magma_ocean_layer.lower_boundary_flux(values[1], values[0], mantle_bottom_flux)
             dTcore_dt = self.core_layer.core_energy_balance(values[0], magma_ocean_bottom_flux)
             self.magma_ocean_layer.update_boundary_location(values[1])
+
             print("mantle flux={0:.3f} W/m^2".format(mantle_bottom_flux))
             print("magma ocean flux={0:.3f} W/m^2".format(magma_ocean_bottom_flux))
-
+            self.D_mo_t.append(t)
+            self.D_mo.append(self.magma_ocean_layer.thickness)
             return np.array([dTcore_dt, dTmagmaocean_dt, dTmantle_dt])
 
         solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_magma_ocean_initial, T_mantle_initial]), times)
+
         return times, solution
 
     def draw(self):
@@ -178,15 +183,31 @@ class CoreLayer(Layer):
     def core_energy_balance(self, T_cmb, core_flux):
         pc = self.params.core
         core_surface_area = self.outer_surface_area
-        inner_core_surface_area = np.power(self.inner_core_radius(T_cmb), 2.0) * 4. * np.pi
-        dRi_dTcmb = 0.
-        try:
-            dRi_dTcmb = derivative( self.inner_core_radius, T_cmb, dx=1.0)
-        except ValueError:
-            pass
+        if self.params.source == 'Stevenson_1983' :
+            inner_core_surface_area = np.power(self.inner_core_radius(T_cmb), 2.0) * 4. * np.pi
+            dRi_dTcmb = 0.
+            try:
+                dRi_dTcmb = derivative( self.inner_core_radius, T_cmb, dx=1.0)
+            except ValueError:
+                pass
+        elif self.params.source == 'Driscoll_2014' :
+            dRi_dTcmb = 0.
+            inner_core_surface_area = 0.
+            # Eqn 29 & 30 from the Driscoll_2014 paper. Note that Eqn 32 in the paper has an error and the form in the code is correct
+            sqrt_term_num = (pc.Dn/self.params.R_c0)**2.*np.log(pc.TFe/T_cmb) - 1.
+            sqrt_term_den = 2.*(1. - 1./(3.*pc.gamma_c))*(pc.Dn/pc.DFe)**2. - 1.
+            if sqrt_term_num/sqrt_term_den > 0 :
+                R_ic = self.params.R_c0*np.sqrt(sqrt_term_num/sqrt_term_den)
+                print('\n\n R_ic={0:.3f}'.format(R_ic/1e3))
+                inner_core_surface_area = np.power(R_ic, 2.0) * 4. * np.pi
+                dRi_dTcmb = -1.*((self.params.R_c0/2./T_cmb)*(pc.Dn/self.params.R_c0)**2.)/(sqrt_term_num*sqrt_term_den)
+        else :
+            raise ValueError('parameter class is not recognized')
+        # print('\n\n ratio={0:.1f}'.format(inner_core_surface_area/core_surface_area))
         thermal_energy_change = pc.rho*pc.C*self.volume*pc.mu
         latent_heat = -pc.L_Eg * pc.rho * inner_core_surface_area * dRi_dTcmb
         dTdt = -core_flux * core_surface_area / (thermal_energy_change-latent_heat)
+        dTdt = -core_flux * core_surface_area / (thermal_energy_change)
         return dTdt
 
     def ODE( self, T_cmb_initial, cmb_flux ):
@@ -463,120 +484,41 @@ class MantleLayer(Layer):
         dTdt = lambda x, t : self.mantle_energy_balance( t, x, T_mantle_bottom )
         return dTdt
 
-class Parameters(object):
-    def __init__(self, source):
-        self.source = source
-        pass
+Stevenson_E1 = Stevenson_1983(case=1)
+Stevenson_E2 = Stevenson_1983(case=2)
+Driscoll = Driscoll_2014()
 
-Stevenson = Parameters('Stevenson 1983')
-Stevenson.R_p0 = 6371e3 # - [m] from Stevenson Table II
-Stevenson.R_c0 = 3485e3 # - [m] from Stevenson pg. 474
-Stevenson.g = 10. # - [m/s^2] from Stevenson Table II
-Stevenson.T_s = 293. # - [K] from Stevenson Table II
+param2layer = Driscoll
 
-Stevenson.mantle = Parameters('Stevenson 1983, for mantle')
-Stevenson.mantle.mu = 1.3 # - [] from Stevenson pg. 473 and Table II
-Stevenson.mantle.alpha = 2e-5 # - [/K] from Stevenson Table I
-Stevenson.mantle.k = 4.0 # - [W/m-K] from Stevenson Table I
-Stevenson.mantle.K = 1e-6 # - [m^2/s] from Stevenson Table I
-Stevenson.mantle.rhoC = 4e6 # - [J/m^3-K] from Stevenson Table I
-Stevenson.mantle.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
-Stevenson.mantle.C = Stevenson.mantle.rhoC/Stevenson.mantle.rho # - [J/K-kg]
-Stevenson.mantle.Q_0 = 0.
-# Stevenson.mantle.Q_0 = 1.7e-7 # - [W/m^3] from Stevenson Table I
-Stevenson.mantle.lam = 1.38e-17 # - [1/s] from Stevenson Table I
-Stevenson.mantle.A = 5.2e4 # - [K] from Stevenson Table I
-Stevenson.mantle.nu_0 = 4.0e3 # - [m^2/s] from Stevenson Table I
-Stevenson.mantle.Ra_crit = 5e2 # - [] from Stevenson Table I
-Stevenson.mantle.beta = 0.3 # - [] from Stevenson Table I
-Stevenson.mantle.g = Stevenson.g # - [m/s^2] from Stevenson Table II
-Stevenson.mantle.Ra_boundary_crit = 2e3 # empirical parameter
+# Earth = Planet( [ CoreLayer( 0.0, param2layer.R_c0, params=param2layer) , MantleLayer( param2layer.R_c0, param2layer.R_p0, params=param2layer) ] )
 
-Stevenson.core = Parameters('Stevenson 1983, for core')
-Stevenson.core.rho = 13000. # - [kg/m^3] from Stevenson pg. 474
-Stevenson.core.alpha = 2e-5 # - [/K] from Stevenson Table I
-Stevenson.core.rhoC = Stevenson.mantle.rhoC # - [J/m^3-K] from Stevenson Table I
-Stevenson.core.C = Stevenson.core.rhoC/Stevenson.core.rho
-Stevenson.core.x_0 = 0.1 # - [wt% S] from Stevenson pg. 474
-Stevenson.core.P_c = 360e9 # - [Pa] from Stevenson pg. 474
-Stevenson.core.P_cm = 140e9 # - [Pa] from Stevenson pg. 474
-Stevenson.core.mu = 1.2 # - [] from Stevenson pg. 473 and Table II
-Stevenson.core.T_m1 = 6.14e-12 # - [K/Pa] from Stevenson Table II
-Stevenson.core.T_m2 = -4.5e-24 # - [K/Pa^2] from Stevenson Table II
-Stevenson.core.T_a1 = 3.96e-12 # - [K/Pa] from Stevenson Table II
-Stevenson.core.T_a2 = -3.3e-24 # - [K/Pa^2] from Stevenson Table II
+Andrault_f_perioditic = Andrault_2011_Stevenson(composition="f_perioditic", Stevenson_case=1)
+Andrault_a_chondritic = Andrault_2011_Stevenson(composition="a_chondritic", Stevenson_case=1)
 
-Stevenson_E1 = copy.deepcopy(Stevenson)
-Stevenson_E1.core.L_Eg = 1e6 # - [J/kg] from Stevenson Table III
-Stevenson_E1.core.T_m0 = 1950. # - [K] from Stevenson Table III
-
-Stevenson_E2 = copy.deepcopy(Stevenson)
-Stevenson_E2.core.L_Eg = 2e6 # - [J/kg] from Stevenson Table III
-Stevenson_E2.core.T_m0 = 1980. # - [K] from Stevenson Table III
-
-Stevenson_E3 = copy.deepcopy(Stevenson)
-Stevenson_E3.core.L_Eg = 1e6 # - [J/kg] from Stevenson Table III
-Stevenson_E3.core.T_m0 = 1980. # - [K] from Stevenson Table III
-
-Stevenson_E4 = copy.deepcopy(Stevenson)
-Stevenson_E4.core.L_Eg = 2e6 # - [J/kg] from Stevenson Table III
-Stevenson_E4.core.T_m0 = 2030. # - [K] from Stevenson Table III
-
-Andrault = copy.deepcopy(Stevenson_E1)
-
-Andrault.D_mo0 = 500e3 # - [km] initial thickness of magma ocean guess
-Andrault.R_mo0 = Andrault.R_c0 + Andrault.D_mo0
-
-Andrault.magma_ocean = Parameters('From Stevenson E1 and Andrault')
-Andrault.magma_ocean.c1_sol = 2081.8 # - [K] from Moneteux 2016 (12) citing Andrault 2011
-Andrault.magma_ocean.c2_sol = 101.69e9 # - [Pa] from Moneteux 2016 (12) citing Andrault 2011
-Andrault.magma_ocean.c3_sol = 1.226 # - [] from Moneteux 2016 (12) citing Andrault 2011
-Andrault.magma_ocean.alpha = 2e-5 # - [/K] from Stevenson Table I for mantle
-Andrault.magma_ocean.k = 4.0 # - [W/m-K] from Stevenson Table I for mantle
-Andrault.magma_ocean.K = 1e-6 # - [m^2/s] from Stevenson Table I for mantle
-Andrault.magma_ocean.rhoC = 4e6 # - [J/m^3-K] from Stevenson Table I for mantle
-Andrault.magma_ocean.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
-Andrault.magma_ocean.C = Andrault.magma_ocean.rhoC/Andrault.magma_ocean.rho # - [J/K-kg]
-Andrault.magma_ocean.L_Eg = 3e5 # - [J/kg] guess
-Andrault.magma_ocean.Q_0 = 0.
-Andrault.magma_ocean.lam = 1.38e-17 # - [1/s] from Stevenson Table I
-Andrault.magma_ocean.g = Stevenson.g # - [m/s^2] from Stevenson Table II
-Andrault.magma_ocean.nu = 1e-1 # - [m^2/s] -- estimate
-Andrault.magma_ocean.mu = 1. # - [] -- ratio of average layer temperature to T_magma_ocean at top estimate
-Andrault.magma_ocean.Ra_crit = 5e2 # - [] from Stevenson Table I
-Andrault.magma_ocean.Ra_boundary_crit = 2e3 # empirical parameter
-Andrault.magma_ocean.beta = 0.3 # - [] from Stevenson Table I
-
-Andrault_f_peridotitic = copy.deepcopy(Andrault)
-Andrault_f_peridotitic.magma_ocean.c1_liq = 78.74 # - [K] from Moneteux 2016 (13) citing Andrault 2011
-Andrault_f_peridotitic.magma_ocean.c2_liq = 4.054e6 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
-Andrault_f_peridotitic.magma_ocean.c3_liq = 2.44 # - [] from Moneteux 2016 (13) citing Andrault 2011
-
-Andrault_a_chondritic = copy.deepcopy(Andrault)
-Andrault_a_chondritic.magma_ocean.c1_liq = 2006.8 # - [K] from Moneteux 2016 (13) citing Andrault 2011
-Andrault_a_chondritic.magma_ocean.c2_liq = 34.65e9 # - [Pa] from Moneteux 2016 (13) citing Andrault 2011
-Andrault_a_chondritic.magma_ocean.c3_liq = 1.844 # - [] from Moneteux 2016 (13) citing Andrault 2011
-
-
-
+# param3layer = Andrault_f_perioditic
+param3layer = Andrault_a_chondritic
+Earth = Planet( [ CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
+                  MagmaOceanLayer(param3layer.R_c0, param3layer.R_mo0, params=param3layer),
+                  MantleLayer(param3layer.R_mo0, param3layer.R_p0, params=param3layer) ] )
 #%%
-Earth = Planet( [ CoreLayer( 0.0, Andrault_f_peridotitic.R_c0, params=Andrault_f_peridotitic) ,
-                  MagmaOceanLayer(Andrault_f_peridotitic.R_c0, Andrault_f_peridotitic.R_mo0, params=Andrault_f_peridotitic),
-                  MantleLayer(Andrault_f_peridotitic.R_mo0, Andrault_f_peridotitic.R_p0, params=Andrault_f_peridotitic) ] )
-#%%
-T_cmb_initial = 9580.
-T_magma_ocean_initial = 8500.
-T_mantle_initial = 4500.
-end_time = 4e6*365.25*24.*3600.
+T_cmb_initial = 9400. # K
+T_magma_ocean_initial = 8200. # K
+T_mantle_initial = 5100. # K
+end_time_Mya = 20 # Mya
+end_time = end_time_Mya*1e6*365.25*24.*3600. # s
 
-Nt = 3000
+Nt = 4000
 times = np.linspace(0., end_time, Nt)
-D_magma_ocean_initial = Andrault_f_peridotitic.D_mo0
 t, y = Earth.integrate(T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times)
 t_plt = t/(365.25*24.*3600.*1e6)
 t_pltind = Nt
+
+tD = np.array(Earth.D_mo_t)/(365.25*24.*3600.*1e6)
+D = np.array(Earth.D_mo)
+print(tD, D/1e3)
 plt.plot( t_plt[:t_pltind], y[:t_pltind,0])
 plt.plot( t_plt[:t_pltind], y[:t_pltind,1])
 plt.plot( t_plt[:t_pltind], y[:t_pltind,2])
-# plt.plot( t/(np.pi*1e7), y[:,3])
+plt.plot( tD, D/1e3)
 plt.show()
+# plt.savefig("temperatures vs time")
