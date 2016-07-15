@@ -109,7 +109,8 @@ class Driscoll_2014(Parameters) :
         self.core.Q_0_low = 6.798e-9 # - [W/m^3] from Pg 41
 
 class Andrault_2011_Stevenson(Stevenson_1983):
-    def __init__(self, composition):
+    def __init__(self, composition, Stevenson_case):
+        Stevenson_1983.__init__(self, Stevenson_case)
         self.D_mo0 = 500e3 # - [km] initial thickness of magma ocean guess
         self.R_mo0 = self.R_c0 + self.D_mo0
         self.magma_ocean = Parameters('From Stevenson E1 and Andrault')
@@ -123,7 +124,7 @@ class Andrault_2011_Stevenson(Stevenson_1983):
         self.magma_ocean.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
         self.magma_ocean.C = self.magma_ocean.rhoC/self.magma_ocean.rho # - [J/K-kg]
         self.magma_ocean.L_Eg = 3e5 # - [J/kg] guess
-        self.magma_ocean.Q_0 = 0.
+        self.magma_ocean.Q_0 = 1.7e-7 # - [W/m^3] from Stevenson Table I
         self.magma_ocean.lam = 1.38e-17 # - [1/s] from Stevenson Table I
         self.magma_ocean.g = self.g # - [m/s^2] from Stevenson Table II
         self.magma_ocean.nu = 1e-1 # - [m^2/s] -- estimate
@@ -146,7 +147,8 @@ class Andrault_2011_Stevenson(Stevenson_1983):
             raise ValueError("Composition for Andrault_2011 must be f_perioditic or a_chondrtic")
 
 class Andrault_2011_Driscoll(Driscoll_2014):
-    def __init__(self, composition):
+    def __init__(self, composition, Stevenson_case):
+        Stevenson_1983.__init__(self, Stevenson_case)
         self.D_mo0 = 500e3 # - [km] initial thickness of magma ocean guess
         self.R_mo0 = self.R_c0 + self.D_mo0
         self.magma_ocean = Parameters('From Stevenson E1 and Andrault')
@@ -160,7 +162,7 @@ class Andrault_2011_Driscoll(Driscoll_2014):
         self.magma_ocean.rho = 5000. # - [kg/m^3] -- guess as Stevenson never explicitly states his assumption for rho or C
         self.magma_ocean.C = self.magma_ocean.rhoC/self.magma_ocean.rho # - [J/K-kg]
         self.magma_ocean.L_Eg = 3e5 # - [J/kg] guess
-        self.magma_ocean.Q_0 = 0.
+        self.magma_ocean.Q_0 = 1.7e-7 # - [W/m^3] from Stevenson Table I
         self.magma_ocean.lam = 1.38e-17 # - [1/s] from Stevenson Table I
         self.magma_ocean.g = self.g # - [m/s^2] from Stevenson Table II
         self.magma_ocean.nu = 1e-1 # - [m^2/s] -- estimate

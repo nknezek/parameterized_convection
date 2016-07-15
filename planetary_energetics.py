@@ -26,7 +26,8 @@ class Planet(object):
         print("R_p={0:.1f} km, R_mo={1:.1f} km, R_c={2:.1f} km".format(self.mantle_layer.outer_radius, self.magma_ocean_layer.outer_radius, self.core_layer.outer_radius))
 
     def integrate( self, T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times):
-        
+        self.D_mo = []
+        self.D_mo_t = []
         def ODE( values, t ):
             P_mo = self.magma_ocean_layer.calculate_pressure_magma_ocean_top()
             T_liq = self.magma_ocean_layer.calculate_liquidous_temp(P_mo)
@@ -46,12 +47,15 @@ class Planet(object):
             magma_ocean_bottom_flux = self.magma_ocean_layer.lower_boundary_flux(values[1], values[0], mantle_bottom_flux)
             dTcore_dt = self.core_layer.core_energy_balance(values[0], magma_ocean_bottom_flux)
             self.magma_ocean_layer.update_boundary_location(values[1])
+
             print("mantle flux={0:.3f} W/m^2".format(mantle_bottom_flux))
             print("magma ocean flux={0:.3f} W/m^2".format(magma_ocean_bottom_flux))
-
+            self.D_mo_t.append(t)
+            self.D_mo.append(self.magma_ocean_layer.thickness)
             return np.array([dTcore_dt, dTmagmaocean_dt, dTmantle_dt])
 
         solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_magma_ocean_initial, T_mantle_initial]), times)
+
         return times, solution
 
     def draw(self):
@@ -199,7 +203,7 @@ class CoreLayer(Layer):
                 dRi_dTcmb = -1.*((self.params.R_c0/2./T_cmb)*(pc.Dn/self.params.R_c0)**2.)/(sqrt_term_num*sqrt_term_den)
         else :
             raise ValueError('parameter class is not recognized')
-        print('\n\n ratio={0:.1f}'.format(inner_core_surface_area/core_surface_area))
+        # print('\n\n ratio={0:.1f}'.format(inner_core_surface_area/core_surface_area))
         thermal_energy_change = pc.rho*pc.C*self.volume*pc.mu
         latent_heat = -pc.L_Eg * pc.rho * inner_core_surface_area * dRi_dTcmb
         dTdt = -core_flux * core_surface_area / (thermal_energy_change-latent_heat)
@@ -488,27 +492,33 @@ param2layer = Driscoll
 
 # Earth = Planet( [ CoreLayer( 0.0, param2layer.R_c0, params=param2layer) , MantleLayer( param2layer.R_c0, param2layer.R_p0, params=param2layer) ] )
 
-Andrault_f_perioditic = Andrault_2011_Stevenson(composition="f_perioditic")
-Andrault_a_chondritic = Andrault_2011_Stevenson(composition="a_chondritic")
+Andrault_f_perioditic = Andrault_2011_Stevenson(composition="f_perioditic", Stevenson_case=1)
+Andrault_a_chondritic = Andrault_2011_Stevenson(composition="a_chondritic", Stevenson_case=1)
 
-param3layer = Andrault_f_perioditic
+# param3layer = Andrault_f_perioditic
+param3layer = Andrault_a_chondritic
 Earth = Planet( [ CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
                   MagmaOceanLayer(param3layer.R_c0, param3layer.R_mo0, params=param3layer),
                   MantleLayer(param3layer.R_mo0, param3layer.R_p0, params=param3layer) ] )
 #%%
-T_cmb_initial = 9580. # K
-T_magma_ocean_initial = 8500. # K
-T_mantle_initial = 4500. # K
-end_time_Mya = 10 # Mya
+T_cmb_initial = 9400. # K
+T_magma_ocean_initial = 8200. # K
+T_mantle_initial = 5100. # K
+end_time_Mya = 20 # Mya
 end_time = end_time_Mya*1e6*365.25*24.*3600. # s
 
-Nt = 3000
+Nt = 4000
 times = np.linspace(0., end_time, Nt)
 t, y = Earth.integrate(T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times)
 t_plt = t/(365.25*24.*3600.*1e6)
 t_pltind = Nt
+
+tD = np.array(Earth.D_mo_t)/(365.25*24.*3600.*1e6)
+D = np.array(Earth.D_mo)
+print(tD, D/1e3)
 plt.plot( t_plt[:t_pltind], y[:t_pltind,0])
 plt.plot( t_plt[:t_pltind], y[:t_pltind,1])
 plt.plot( t_plt[:t_pltind], y[:t_pltind,2])
-# plt.plot( t/(np.pi*1e7), y[:,3])
+plt.plot( tD, D/1e3)
 plt.show()
+# plt.savefig("temperatures vs time")
