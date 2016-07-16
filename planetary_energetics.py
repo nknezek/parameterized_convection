@@ -25,7 +25,7 @@ class Planet(object):
         self.mantle_layer.planet = self
         print("R_p={0:.1f} km, R_mo={1:.1f} km, R_c={2:.1f} km".format(self.mantle_layer.outer_radius, self.magma_ocean_layer.outer_radius, self.core_layer.outer_radius))
 
-    def integrate( self, T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times, verbose=False):
+    def integrate( self, times, T_cmb_initial, T_magma_ocean_initial=None, T_mantle_initial=None, verbose=False):
         self.D_mo = []
         self.t_all = []
         self.T_umo = []
@@ -57,8 +57,12 @@ class Planet(object):
             self.T_umo.append(T_umo)
             return np.array([dTcore_dt, dTmagmaocean_dt, dTmantle_dt])
 
+        if T_magma_ocean_initial is None:
+            T_magma_ocean_initial = self.magma_ocean_layer.adiabat_from_bottom(T_cmb_initial)+10.
+            T_mantle_initial = self.mantle_layer.adiabat_from_bottom(T_magma_ocean_initial, self.mantle_layer.thickness-500e3)+10.
+        print("T_cmb0={0:.1f} K, T_mo0={1:.1f} K, T_ma0={2:.1f} K".format(T_cmb_initial, T_magma_ocean_initial, T_mantle_initial))
         solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_magma_ocean_initial, T_mantle_initial]), times)
-
+        print("done!")
         return times, solution
 
     def draw(self):
@@ -220,6 +224,9 @@ class CoreLayer(Layer):
 class MagmaOceanLayer(Layer):
     def __init__(self,inner_radius,outer_radius, params={}):
         Layer.__init__(self,inner_radius,outer_radius, params)
+
+    def adiabat_from_bottom(self, T_cmb):
+        return self.upper_temperature(T_cmb)
 
     def lower_temperature(self, T_magma_ocean):
         '''
@@ -388,6 +395,10 @@ class MantleLayer(Layer):
     def __init__(self,inner_radius,outer_radius, params={}):
         Layer.__init__(self,inner_radius,outer_radius,params)
 
+    def adiabat_from_bottom(self, T_magma_ocean_top, distance):
+        pm = self.params.mantle
+        return T_magma_ocean_top*( 1.0 - pm.alpha*pm.g*distance/pm.C)
+
     def average_mantle_temp(self, T_upper_mantle):
         pm = self.params.mantle
         return  T_upper_mantle * pm.mu
@@ -529,15 +540,17 @@ Earth = Planet( [ CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
 T_cmb_initial = 9500. # K
 T_magma_ocean_initial = 8400. # K
 T_mantle_initial = 5200. # K
-end_time_Mya = 4568 # Mya
-# end_time_Mya = 14 # Mya
+# end_time_Mya = 4568 # Mya
+end_time_Mya = 14 # Mya
 end_time = end_time_Mya*1e6*const_yr_to_sec# s
 
-Nt = 40000
+Nt = 2000*end_time_Mya
 times = np.linspace(0., end_time, Nt)
-t, y = Earth.integrate(T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, times, verbose=False)
-t_plt = t/(365.25*24.*3600.*1e6)
-t_pltind = Nt
+# t, y = Earth.integrate(times, T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, verbose=False)
+t, y = Earth.integrate(times, T_cmb_initial, None, None, verbose=False)
+num_to_plot = 10000
+dN = int(len(t)/num_to_plot)
+t_plt = t[::dN]/(365.25*24.*3600.*1e6)
 
 def filter_ODE(t,data):
     tn = []
@@ -553,19 +566,21 @@ def filter_ODE(t,data):
     dataout = np.array(datan)[::-1]
     return tout, dataout
 
-t_all = np.array(Earth.t_all)/(365.25*24.*3600.*1e6)
-D = np.array(Earth.D_mo)
-T_umo = np.array(Earth.T_umo)
+t_all = np.array(Earth.t_all[::dN])/(365.25*24.*3600.*1e6)
+D = np.array(Earth.D_mo[::dN])
+T_umo = np.array(Earth.T_umo[::dN])
 tD, D = filter_ODE(t_all, D)
 tD, T_umo = filter_ODE(t_all, T_umo)
 
-plt.plot( t_plt[:t_pltind], y[:t_pltind,0])
-plt.plot( t_plt[:t_pltind], y[:t_pltind,1])
+
+plt.plot( t_plt, y[::dN,0])
+# plt.plot( t_plt[:t_pltind], y[:t_pltind,1])
 plt.plot( tD, T_umo)
-plt.plot( t_plt[:t_pltind], y[:t_pltind,2])
-plt.plot( tD, D/1e3)
+plt.plot( t_plt, y[::dN,2])
+plt.plot( tD, D/1e2)
 plt.title("Thermal Evolution of Earth")
-plt.ylabel(r"Temperature (K) or thickness (km)")
+plt.ylabel(r"Temperature (K) or thickness (*0.1km)")
 plt.xlabel(r"Time (Myr)")
-plt.legend(["T - Core Mantle Boundary", "T - Lower Magma Ocean", "T - Upper Magma Ocean", "T - Upper Mantle", "Thickness of Magma Ocean"], loc=0)
+plt.legend(["T - Core Mantle Boundary", "T - Upper Magma Ocean", "T - Upper Mantle", "Thickness of Magma Ocean"], loc=0)
+plt.grid()
 plt.savefig("thermal_evolution_T_cmb{0:.0f}K_t{1:.0f}Myr.png".format(T_cmb_initial, end_time_Mya))
