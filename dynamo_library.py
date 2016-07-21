@@ -36,6 +36,8 @@ class Nimmo_2015(params.Parameters):
         self.delta_rho_c = 560 # kg/m^3
         self.C_r = -10100 # m/K
         self.G = 6.67408e-11 # m^3/kg-s
+        self.h_0 = 1.e-11 # - [W/kg] similar to Stevenson Table I
+        self.lam = 1.38e-17 # - [1/s] from Stevenson Table I
 
 p = Nimmo_2015('Nimmo 2015')
 
@@ -215,3 +217,19 @@ class core_energetics():
         Qt_T = self.Qt_T(T_cmb, r_i)
         Q_cmb = self.Q_cmb(T_cmb, dT_cmb_dt, r_i, h)
         return (Q_cmb - self.Q_R(h)*(1-Qt_T/Et_T/T_R)) *Et_T/Qt_T - self.E_k()
+
+    def Q_phi(self, T_cmb, dT_cmb_dt, r_i, h, T_R):
+        E_phi = self.E_phi(T_cmb, dT_cmb_dt, r_i, h, T_R)
+        return E_phi*T_R
+
+    def heat_production(self, time):
+        '''
+        Equation (2) from Stevenson et al 1983
+        '''
+        return p.h_0*np.exp(-p.lam*time)
+
+    def core_energy_balance(self, time, T_cmb, Q_cmb):
+        r_i = self.inner_core_radius(T_cmb)
+        Qt_T = self.Qt_T(T_cmb, r_i)
+        Q_R = self.Q_R(self.heat_production(time))
+        return (Q_cmb - Q_R)/Qt_T

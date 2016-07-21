@@ -16,8 +16,8 @@ Driscoll = params.Driscoll_2014()
 param2layer = Driscoll
 # Earth = Planet( [ CoreLayer( 0.0, param2layer.R_c0, params=param2layer) , MantleLayer( param2layer.R_c0, param2layer.R_p0, params=param2layer) ] )
 
-Andrault_f_perioditic = params.Andrault_2011_Stevenson(composition="f_perioditic", Stevenson_case=1)
-Andrault_a_chondritic = params.Andrault_2011_Stevenson(composition="a_chondritic", Stevenson_case=1)
+Andrault_f_perioditic = params.Andrault_2011_Stevenson(composition="f_perioditic", Stevenson_case=2)
+Andrault_a_chondritic = params.Andrault_2011_Stevenson(composition="a_chondritic", Stevenson_case=2)
 # param3layer = Andrault_f_perioditic
 param3layer = Andrault_a_chondritic
 
@@ -34,7 +34,7 @@ Earth = pe.Planet( [ pe.CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
 # T_cmb_initial = 8200. # K
 # T_magma_ocean_initial = 7245. # K
 # T_mantle_initial = 4200. # K
-T_cmb_initial = 5500. # K
+T_cmb_initial = 5200. # K
 # T_magma_ocean_initial = 8400. # K
 # T_mantle_initial = 5200. # K
 
@@ -51,34 +51,43 @@ t, y = Earth.integrate(times, T_cmb_initial, None, None, verbose=False)
 
 
 
-### Plot Results
+### Calculate other variables
 num_to_plot = 1000
 dN = int(len(t)/num_to_plot)
+T_cmb = y[::dN,0]
+T_mo = y[::dN,1]
+T_um = y[::dN,2]
 t_plt = t[::dN]/(365.25*24.*3600.*1e6)
+r_i = np.array([Earth.core_layer.inner_core_radius(T) for T in T_cmb])
+
 t_all = np.array(Earth.t_all)/(365.25*24.*3600.*1e6)
 D = np.array(Earth.D_mo)
 T_umo = np.array(Earth.T_umo)
-tD, Do = Earth.filter_ODE_results(t_all, D)
-t2, T_umo = Earth.filter_ODE_results(t_all, T_umo)
+t_all_filtered, D_mo_filtered = Earth.filter_ODE_results(t_all, D)
+t_all_filtered, T_umo_filtered = Earth.filter_ODE_results(t_all, T_umo)
 T_umo = T_umo[::dN]
-tD = tD[::dN]
-Do2 = Do[::dN]
-t_all = t_all[::dN]
-peplot.plot_thermal_history(t_plt, y[::dN,0], y[::dN,2], times_calculated=tD, T_upper_magma_ocean=T_umo, D_magma_ocean=Do2)
+D_mo = D_mo_filtered[::dN]
+t_filtered = t_all_filtered[::dN]
+
+### Plot Results
+peplot.plot_thermal_history(t_plt, T_cmb, T_um, times_calculated=t_filtered, T_upper_magma_ocean=T_umo, D_magma_ocean=D_mo, r_i=r_i)
+
 
 ## Calculate Solubility and Exsolution
+
 P_cmb = 135e6 # Pa
 initial_concentration = 0.01
-deg_fit = 1
-# Mg_sol = sol.MgDubrovinskaia()
-Mg_sol = sol.MgBadro()
 Tin = y[::dN,0]
 Pin = P_cmb*np.ones(len(Tin))
+
+# Mg_sol = sol.MgDubrovinskaia()
+# deg_fit = 1
 # solubility = Mg_sol.solubility(Pin, Tin, deg=deg_fit)
-solubility = Mg_sol.solubility(Pin, Tin)
+Mg_sol = sol.MgBadro()
+solubility = Mg_sol.solubility_OxyRatio(Tin, X_MgO=1.)
+
 wt = Mg_sol.solubility_to_wt(solubility)
 ex_wt = Mg_sol.exsolution(wt, t_plt, initial_concentration=initial_concentration)
-# ex_wt = Mg_sol.solubility_to_wt(exsolution)
 fig = plt.figure(figsize=(8,6))
 plt.plot(t_plt, wt)
 plt.plot(t_plt[1:], -ex_wt*1000)
