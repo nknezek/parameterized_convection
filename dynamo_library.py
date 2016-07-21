@@ -3,6 +3,7 @@ import numpy as np
 import scipy.special as spec
 from numpy import pi, exp
 import scipy.optimize as opt
+import scipy.integrate as integrate
 
 class Nimmo_2015(params.Parameters):
     def __init__(self, source):
@@ -28,7 +29,7 @@ class Nimmo_2015(params.Parameters):
 
         self.alpha = 1.25e-5 # /K
         self.L_H = 750e3 # J/kg
-        self.k = 130 # W/m-K
+        self.k = 220 # W/m-K
         self.D = 6203e3 # m
         self.D_k = 5900e3 # pg. 42
         self.C_p = 840 # J/kg-K
@@ -149,19 +150,22 @@ class core_energetics():
         T_i = self.T_adiabat_from_T_cmb(T_cmb, r_i)
         return Qt_L*(T_i-T_cmb)/(T_i*T_cmb)
 
-    def phi(self, r):
-        2/3*pi*p.G*p.rho_cen*r**2*(1-3*r**2/(10*p.L**2)) - 2/3*pi*p.G*p.rho_cen*p.r_c**2*(1-3*p.r_c**2/(10*p.L**2))
-
     def Q_g(self, dT_cmb_dt, r_i, I_g=None):
         if I_g is None:
             I_g = self.I_g(r_i)
-        return I_g*p.alpha_c*self.C_c(r_i)*p.C_r*dT_cmb_dt
+        M_oc = self.compute_mass_of_partial_core(p.r_c, r_i)
+        return (I_g-M_oc*self.phi(r_i))*p.alpha_c*self.C_c(r_i)*p.C_r*dT_cmb_dt
+
+    def Q_ex(self, exsolution):
+        pass
 
     def Qt_g(self, r_i, I_g=None):
         if I_g is None:
             I_g = self.I_g(r_i)
         return I_g*p.alpha_c*self.C_c(r_i)*p.C_r
 
+    def phi(self, r):
+        return (2/3*pi*p.G*p.rho_cen*r**2*(1-3*r**2/(10*p.L**2)))- (2/3*pi*p.G*p.rho_cen*p.r_c**2*(1-3*p.r_c**2/(10*p.L**2)))
 
     def I_g(self, r_i):
         Csq = 3*p.L**2/16 - p.r_c**2/2*(1-3*p.r_c**2/(10*p.L**2))
@@ -212,15 +216,16 @@ class core_energetics():
         else:
             return opt.brentq(TaTm, p.P(p.r_c), p.P(0.))
 
-    def E_phi(self, T_cmb, dT_cmb_dt, r_i, h, T_R):
+    def E_phi(self, T_cmb, dT_cmb_dt, r_i, h):
         Et_T = self.Et_T(T_cmb, r_i)
         Qt_T = self.Qt_T(T_cmb, r_i)
+        T_R = self.T_R(T_cmb, h)
         Q_cmb = self.Q_cmb(T_cmb, dT_cmb_dt, r_i, h)
         return (Q_cmb - self.Q_R(h)*(1-Qt_T/Et_T/T_R)) *Et_T/Qt_T - self.E_k()
 
-    def Q_phi(self, T_cmb, dT_cmb_dt, r_i, h, T_R):
-        E_phi = self.E_phi(T_cmb, dT_cmb_dt, r_i, h, T_R)
-        return E_phi*T_R
+    def Q_phi(self, T_cmb, dT_cmb_dt, r_i, h, T_D):
+        E_phi = self.E_phi(T_cmb, dT_cmb_dt, r_i, h)
+        return E_phi*T_D
 
     def heat_production(self, time):
         '''

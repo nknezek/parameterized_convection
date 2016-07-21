@@ -5,6 +5,7 @@ import solubility_library as sol
 import plotting_library as peplot
 import planetary_energetics as pe
 import isotope_library as iso
+import dynamo_library as dyn
 const_yr_to_sec = 31557600
 
 
@@ -57,7 +58,8 @@ dN = int(len(t)/num_to_plot)
 T_cmb = y[::dN,0]
 T_mo = y[::dN,1]
 T_um = y[::dN,2]
-t_plt = t[::dN]/(365.25*24.*3600.*1e6)
+t_sec = t[::dN]
+t_plt = t_sec/(const_yr_to_sec*1e6)
 r_i = np.array([Earth.core_layer.inner_core_radius(T) for T in T_cmb])
 
 t_all = np.array(Earth.t_all)/(365.25*24.*3600.*1e6)
@@ -70,13 +72,13 @@ D_mo = D_mo_filtered[::dN]
 t_filtered = t_all_filtered[::dN]
 
 ### Plot Results
-peplot.plot_thermal_history(t_plt, T_cmb, T_um, times_calculated=t_filtered, T_upper_magma_ocean=T_umo, D_magma_ocean=D_mo, r_i=r_i)
+peplot.plot_thermal_history2(t_plt, T_cmb, T_um, times_calculated=t_filtered, T_upper_magma_ocean=T_umo, D_magma_ocean=D_mo, r_i=r_i)
 
 
 ## Calculate Solubility and Exsolution
 
 P_cmb = 135e6 # Pa
-initial_concentration = 0.01
+initial_concentration = 0.0095
 Tin = y[::dN,0]
 Pin = P_cmb*np.ones(len(Tin))
 
@@ -84,20 +86,36 @@ Pin = P_cmb*np.ones(len(Tin))
 # deg_fit = 1
 # solubility = Mg_sol.solubility(Pin, Tin, deg=deg_fit)
 Mg_sol = sol.MgBadro()
-solubility = Mg_sol.solubility_OxyRatio(Tin, X_MgO=0.5)
+solubility05 = Mg_sol.solubility_OxyRatio(Tin, X_MgO=0.5)
+wt05 = Mg_sol.solubility_to_wt(solubility05)
+ex_wt05 = Mg_sol.exsolution(wt05, t_plt, initial_concentration=initial_concentration)
 
-wt = Mg_sol.solubility_to_wt(solubility)
-ex_wt = Mg_sol.exsolution(wt, t_plt, initial_concentration=initial_concentration)
+solubility10 = Mg_sol.solubility_OxyRatio(Tin, X_MgO=1.0)
+wt10 = Mg_sol.solubility_to_wt(solubility10)
+ex_wt10 = Mg_sol.exsolution(wt10, t_plt, initial_concentration=initial_concentration)
+
 fig = plt.figure(figsize=(8,6))
-plt.plot(t_plt, wt)
-plt.plot(t_plt[1:], -ex_wt*1000)
+plt.plot(t_plt, wt05*1e2*1.67, 'r-')
+plt.plot(t_plt, wt10*1e2*1.67, 'b-')
+plt.plot(t_plt[1:], -ex_wt05*1e2*1e3*1.67, 'r--')
+plt.plot(t_plt[1:], -ex_wt10*1e2*1e3*1.67, 'b--')
+plt.plot(t_plt, np.ones_like(t_plt)*initial_concentration*1e2*1.67, 'k--')
 plt.xlabel("Time (Mya)")
 plt.ylabel("Mg Solubility (wt%) or Exsolution Rate (wt%/Bya)")
-plt.grid()
-plt.title("Mg Solubility over time, T_cmb0={0:.0f}K".format(T_cmb_initial))
-plt.legend(["Mg Solubility", "Mg Exsolution Rate"])
-plt.savefig('Mg_sol_ex.png')
+# plt.grid()
+plt.title("MgO Solubility and Exsolution".format(T_cmb_initial))
+plt.legend(["MgO solubility - magma ocean", "MgO solubility - MgO layer", "MgO exsolution rate - magma ocean", "MgO exsolution rate - MgO layer", "Initial MgO in core"])
+plt.savefig('Mg_sol_ex.pdf')
 
+## Calculate Dynamo Power
+core_dyn = dyn.core_energetics(c_0 = 0.5, T_cmb0=T_cmb_initial)
+h = np.ones_like(T_cmb)*1e-18
+T_D = 5000. # K - from Nimmo 2015
+dT_cmb_dt = np.diff(T_cmb)/np.diff(t_sec)
+Q_phi = core_dyn.Q_phi(T_cmb[:-1], dT_cmb_dt, r_i[:-1], h[:-1], T_D)
+fig = plt.figure(figsize=(8,6))
+plt.plot(t_plt[:-1], Q_phi/1e12)
+plt.savefig('Dynamo_Power_test.pdf')
 
 ## Calculate Isotopic ratios
 a = 0.
