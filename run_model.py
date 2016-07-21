@@ -34,7 +34,7 @@ Earth = pe.Planet( [ pe.CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
 # T_cmb_initial = 8200. # K
 # T_magma_ocean_initial = 7245. # K
 # T_mantle_initial = 4200. # K
-T_cmb_initial = 5200. # K
+T_cmb_initial = 5500. # K
 # T_magma_ocean_initial = 8400. # K
 # T_mantle_initial = 5200. # K
 
@@ -84,7 +84,7 @@ Pin = P_cmb*np.ones(len(Tin))
 # deg_fit = 1
 # solubility = Mg_sol.solubility(Pin, Tin, deg=deg_fit)
 Mg_sol = sol.MgBadro()
-solubility = Mg_sol.solubility_OxyRatio(Tin, X_MgO=1.)
+solubility = Mg_sol.solubility_OxyRatio(Tin, X_MgO=0.5)
 
 wt = Mg_sol.solubility_to_wt(solubility)
 ex_wt = Mg_sol.exsolution(wt, t_plt, initial_concentration=initial_concentration)
