@@ -6,7 +6,6 @@ import copy
 import scipy.integrate as integrate
 import scipy.optimize as opt
 from scipy.misc import derivative
-from input_parameters import *
 
 class Planet(object):
 
@@ -35,11 +34,12 @@ class Planet(object):
             T_sol = self.magma_ocean_layer.calculate_solidus_temp(P_mo)
             Dlbl_mo = self.magma_ocean_layer.lower_boundary_layer_thickness(values[1], values[0])
             T_umo = self.magma_ocean_layer.upper_temperature(values[1])
+            D_mo = self.magma_ocean_layer.thickness
             if verbose:
                 print("\ntime={0:.4f} Myr".format(t/(365.25*24.*3600.*1e6)))
                 print("T_cmb={0:.1f} K".format(values[0]))
                 print("T_lower_mo={0:.1f} K, D_lbl_mo={1:.3f} m".format(values[1], Dlbl_mo))
-                print("T_upper_mo = {0:.1f} K, T_liq = {1:.1f} K, T_sol={2:.1f} K, D = {3:.1f} km".format(T_umo, T_liq, T_sol, self.magma_ocean_layer.thickness/1e3))
+                print("T_upper_mo = {0:.1f} K, T_liq = {1:.1f} K, T_sol={2:.1f} K, D = {3:.1f} km".format(T_umo, T_liq, T_sol, D_mo/1e3))
                 print("T_lower_mantle={0:.1f} K".format(self.mantle_layer.lower_mantle_temperature(values[2])))
                 print("T_upper_mantle={0:.1f} K".format(values[2]))
 
@@ -53,7 +53,7 @@ class Planet(object):
                 print("mantle flux={0:.3f} W/m^2".format(mantle_bottom_flux))
                 print("magma ocean flux={0:.3f} W/m^2".format(magma_ocean_bottom_flux))
             self.t_all.append(t)
-            self.D_mo.append(self.magma_ocean_layer.thickness)
+            self.D_mo.append(D_mo)
             self.T_umo.append(T_umo)
             return np.array([dTcore_dt, dTmagmaocean_dt, dTmantle_dt])
 
@@ -84,6 +84,20 @@ class Planet(object):
         axes.set_xlim( -r/2.0 , r/2.0 )
         plt.axis('off')
         plt.show()
+
+    def filter_ODE_results(self, t, data):
+        tn = []
+        datan = []
+        N = len(t)
+        last = t[N-1]
+        for ind in range(len(t)):
+            if t[N-ind-1] < last:
+                tn.append(t[N-ind-1])
+                datan.append(data[N-ind-1])
+                last = t[N-ind-1]
+        tout = np.array(tn)[::-1]
+        dataout = np.array(datan)[::-1]
+        return tout, dataout
 
 class Layer(object):
     '''
@@ -517,70 +531,3 @@ class MantleLayer(Layer):
         dTdt = lambda x, t : self.mantle_energy_balance( t, x, T_mantle_bottom )
         return dTdt
 
-Stevenson_E1 = Stevenson_1983(case=1)
-Stevenson_E2 = Stevenson_1983(case=2)
-Driscoll = Driscoll_2014()
-
-param2layer = Driscoll
-
-# Earth = Planet( [ CoreLayer( 0.0, param2layer.R_c0, params=param2layer) , MantleLayer( param2layer.R_c0, param2layer.R_p0, params=param2layer) ] )
-
-Andrault_f_perioditic = Andrault_2011_Stevenson(composition="f_perioditic", Stevenson_case=1)
-Andrault_a_chondritic = Andrault_2011_Stevenson(composition="a_chondritic", Stevenson_case=1)
-
-# param3layer = Andrault_f_perioditic
-param3layer = Andrault_a_chondritic
-Earth = Planet( [ CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
-                  MagmaOceanLayer(param3layer.R_c0, param3layer.R_mo0, params=param3layer),
-                  MantleLayer(param3layer.R_mo0, param3layer.R_p0, params=param3layer) ] )
-#%%
-# T_cmb_initial = 8200. # K
-# T_magma_ocean_initial = 7245. # K
-# T_mantle_initial = 4200. # K
-T_cmb_initial = 9500. # K
-T_magma_ocean_initial = 8400. # K
-T_mantle_initial = 5200. # K
-# end_time_Mya = 4568 # Mya
-end_time_Mya = 14 # Mya
-end_time = end_time_Mya*1e6*const_yr_to_sec# s
-
-Nt = 2000*end_time_Mya
-times = np.linspace(0., end_time, Nt)
-# t, y = Earth.integrate(times, T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, verbose=False)
-t, y = Earth.integrate(times, T_cmb_initial, None, None, verbose=False)
-num_to_plot = 10000
-dN = int(len(t)/num_to_plot)
-t_plt = t[::dN]/(365.25*24.*3600.*1e6)
-
-def filter_ODE(t,data):
-    tn = []
-    datan = []
-    N = len(t)
-    last = t[N-1]
-    for ind in range(len(t)):
-        if t[N-ind-1] < last:
-            tn.append(t[N-ind-1])
-            datan.append(data[N-ind-1])
-            last = t[N-ind-1]
-    tout = np.array(tn)[::-1]
-    dataout = np.array(datan)[::-1]
-    return tout, dataout
-
-t_all = np.array(Earth.t_all[::dN])/(365.25*24.*3600.*1e6)
-D = np.array(Earth.D_mo[::dN])
-T_umo = np.array(Earth.T_umo[::dN])
-tD, D = filter_ODE(t_all, D)
-tD, T_umo = filter_ODE(t_all, T_umo)
-
-
-plt.plot( t_plt, y[::dN,0])
-# plt.plot( t_plt[:t_pltind], y[:t_pltind,1])
-plt.plot( tD, T_umo)
-plt.plot( t_plt, y[::dN,2])
-plt.plot( tD, D/1e2)
-plt.title("Thermal Evolution of Earth")
-plt.ylabel(r"Temperature (K) or thickness (*0.1km)")
-plt.xlabel(r"Time (Myr)")
-plt.legend(["T - Core Mantle Boundary", "T - Upper Magma Ocean", "T - Upper Mantle", "Thickness of Magma Ocean"], loc=0)
-plt.grid()
-plt.savefig("thermal_evolution_T_cmb{0:.0f}K_t{1:.0f}Myr.png".format(T_cmb_initial, end_time_Mya))
