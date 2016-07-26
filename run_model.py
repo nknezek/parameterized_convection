@@ -108,14 +108,56 @@ plt.legend(["MgO solubility - magma ocean", "MgO solubility - MgO layer", "MgO e
 plt.savefig('Mg_sol_ex.pdf')
 
 ## Calculate Dynamo Power
-core_dyn = dyn.core_energetics(c_0 = 0.5, T_cmb0=T_cmb_initial)
-h = np.ones_like(T_cmb)*1e-18
-T_D = 5000. # K - from Nimmo 2015
-dT_cmb_dt = np.diff(T_cmb)/np.diff(t_sec)
-Q_phi = core_dyn.Q_phi(T_cmb[:-1], dT_cmb_dt, r_i[:-1], h[:-1], T_D)
+# core_dyn = dyn.core_energetics(c_0 = 0.5, T_cmb0=T_cmb_initial)
+# h = np.ones_like(T_cmb)*1e-18
+# T_D = 5000. # K - from Nimmo 2015
+# dT_cmb_dt = np.diff(T_cmb)/np.diff(t_sec)
+# Q_phi = core_dyn.Q_phi(T_cmb[:-1], dT_cmb_dt, r_i[:-1], h[:-1], T_D)
+# fig = plt.figure(figsize=(8,6))
+# plt.plot(t_plt[:-1], Q_phi/1e12)
+# plt.savefig('Dynamo_Power_test.pdf')
+
+rho_c = 11000
+delta_rho_c = 500
+rho_MgO = rho_c-delta_rho_c
+g = 5
+h = 3480e3/2
+C_p = 800
+L = 1e6
+M_c = Earth.core_layer.volume*rho_c
+dTdt = np.diff(T_cmb)/np.diff(t_sec)
+Q_s = -M_c*C_p*dTdt*5e-2
+Q_g = -delta_rho_c*g*h*ex_wt05/2e16
+Q_L = -rho_c*L*ex_wt05*M_c/2e16
+Q_MgO = Q_g + Q_L
+Q_g2 = -delta_rho_c*g*h*ex_wt10/2e16
+Q_L2 = -rho_c*L*ex_wt10*M_c/2e16
+Q_MgO2 = Q_g2 + Q_L2
+
+
+L_Eg = 1e6
+dRi_dTcmb = np.diff(r_i)/np.diff(T_cmb)
+inner_core_surface_area = 4*np.pi*r_i[:-1]**2
+Q_ic = -L_Eg * rho_c * inner_core_surface_area * dRi_dTcmb/1e15
+Q_total = Q_s+Q_MgO+Q_ic
+Q_total2 = Q_s+Q_MgO2+Q_ic
+
+# print(Q_s, Q_g, Q_L)
 fig = plt.figure(figsize=(8,6))
-plt.plot(t_plt[:-1], Q_phi/1e12)
+# plt.plot(t_plt[:-1], Q_s/1e12)
+# plt.plot(t_plt[:-1], Q_MgO/1e12)
+# plt.plot(t_plt[:-1], Q_ic/1e12)
+plt.plot(t_plt[:-1], Q_total/1e12)
+plt.plot(t_plt[:-1], Q_total2/1e12)
+plt.plot(t_plt, np.ones_like(t_plt)*0.9, '-', alpha=0.5, linewidth=10., color='0.5')
+# plt.legend(['Q_s','Q_MgO','Q_ic','Q_total'])
+plt.title('Dynamo Power Over Time')
+plt.legend(['magma ocean','MgO layer','Minimum dynamo power'])
+plt.xlabel('Time (Myr)')
+plt.ylabel('Power (TW)')
+plt.xlim([0,4500])
 plt.savefig('Dynamo_Power_test.pdf')
+
 
 ## Calculate Isotopic ratios
 a = 0.
