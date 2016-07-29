@@ -38,15 +38,16 @@ P_cmbp = 139
 
 #%%
 core = dyn.core_energetics(c_0=0.1, T_cmb0=5500.)
-# T_cmb = 4179.5
-T_cmb = 4235
+T_cmb = 4179.5
+# T_cmb = 4235
 r_cmb = 3480e3
 dr = 1.
 dT_cmb_dt = dT_cmb_dtp/(const_yr_to_sec*1e9) # K/s
 
-print('\nT_cmb \t= {0:.1f} K ({1:.0f} K)'.format(T_cmb, T_cmbp))
+print('\ndT_cmb_dt \t= {0:.1f} K/Gyr ({1:.0f} K/Gyr)'.format(dT_cmb_dt*(const_yr_to_sec*1e9), dT_cmb_dtp))
+print('T_cmb \t= {0:.1f} K ({1:.0f} K)'.format(T_cmb, T_cmbp))
 r_i = core.r_i(T_cmb)
-print('r_i \t= {0:.1f} km ({1:.0f} km)'.format(r_i/1e3, r_ip))
+print('\nr_i \t= {0:.1f} km ({1:.0f} km)'.format(r_i/1e3, r_ip))
 T_i = core.T_adiabat_from_T_cmb(T_cmb, r_i)
 print('T_i \t= {0:.1f} K ({1:.0f} K)'.format(T_i, T_ip))
 T_cen = core.T_cen_from_T_cmb(T_cmb)
@@ -121,7 +122,23 @@ print("\nQ_phi \t= {0:.1f} TW".format(Q_phi/1e12))
 E_phi = core.E_phi(T_cmb, dT_cmb_dt, 0.)
 print("E_phi \t= {0:.1f} MK/K".format(E_phi/1e6))
 
+D_stable = core.stable_layer_thickness(T_cmb, dT_cmb_dt, 0.)
+# A_cmb = 4*np.pi*r_cmb**2
+# k=130
+# dTq_dr_cmb = -core.Q_cmb(T_cmb, dT_cmb_dt, 0.)/(A_cmb*k)
+# print('dTq_dr = {0:.2f} K/km'.format(dTq_dr_cmb*1e3))
+# print('dTa_dr = {0:.2f} K/km'.format(dTa_dr_cmb*1e3))
+print('D_stable = {0:.1f} km'.format(D_stable/1e3))
+print('Q_k = {0:.1f} TW'.format(Q_k/1e12))
 
+
+
+
+r_core = np.linspace(0., r_cmb, 1000)
+dTa_dr = core.dTa_dr(T_cmb, r_core)
+plt.plot(r_core/1e3, dTa_dr*1e3)
+plt.grid()
+plt.show()
 plot=True
 if plot:
     # plot adiabat, inner core radius, and

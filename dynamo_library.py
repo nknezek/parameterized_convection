@@ -105,6 +105,10 @@ class core_energetics():
         T_cen = self.T_cen_from_T_cmb(T_cmb)
         return T_cen*exp(-r**2/p.D**2)
 
+    def dTa_dr(self, T_cmb, r):
+        T_cen = self.T_cen_from_T_cmb(T_cmb)
+        return T_cen*(-2*r/p.D**2)*exp(-r**2/p.D**2)
+
     def T_cen_from_T_cmb(self, T_cmb):
         return T_cmb*exp(p.r_c**2/p.D**2)
 
@@ -154,7 +158,7 @@ class core_energetics():
         if self.current_values.C_c is not None and not recompute:
             return self.current_values.C_c
         else:
-            C_c = 4*pi*self.r_i(T_cmb)**2*p.delta_rho_c/(self.compute_mass_of_partial_core(p.r_c, self.r_i(T_cmb))*p.alpha_c)
+            C_c = 4*pi*self.r_i(T_cmb, recompute=recompute, store_computed=store_computed)**2*p.delta_rho_c/(self.compute_mass_of_partial_core(p.r_c, self.r_i(T_cmb, recompute=recompute, store_computed=store_computed))*p.alpha_c)
             if store_computed:
                 self.current_values.C_c = C_c
             return C_c
@@ -195,7 +199,7 @@ class core_energetics():
         if self.current_values.I_g is not None and not recompute:
             return self.current_values.I_g
         else:
-            r_i = self.r_i(T_cmb)
+            r_i = self.r_i(T_cmb, recompute=recompute, store_computed=store_computed)
             Csq = 3*p.L**2/16 - p.r_c**2/2*(1 - 3*p.r_c**2/(10*p.L**2))
             I_g = 8*pi**2*p.rho_cen**2*p.G/3*(
                 (3/20*p.r_c**5 - p.L**2/8*p.r_c**3 - p.L**2*Csq*p.r_c)*exp(-p.r_c**2/p.L**2) + Csq/2*p.L**3*pi**0.5*spec.erf(p.r_c/p.L)
@@ -213,7 +217,7 @@ class core_energetics():
         if self.current_values.dr_i_dt is not None and not recompute:
             return self.current_values.dr_i_dt
         else:
-            dr_i_dt = self.C_r(T_cmb)*dT_cmb_dt
+            dr_i_dt = self.C_r(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
             if store_computed:
                 self.current_values.dr_i_dt = dr_i_dt
             return dr_i_dt
@@ -222,12 +226,12 @@ class core_energetics():
         if self.current_values.Dc_Dt is not None and not recompute:
             return self.current_values.Dc_Dt
         else:
-            Dc_Dt = self.C_c(T_cmb)*self.C_r(T_cmb)*dT_cmb_dt
+            Dc_Dt = self.C_c(T_cmb, recompute=recompute, store_computed=store_computed)*self.C_r(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
             if store_computed:
                 self.current_values.Dc_Dt = Dc_Dt
             return
 
-    def compute_Lhp(self, T_cmb, dP = 1.):
+    def compute_Lhp(self, T_cmb, dP = 1., recompute=False, store_computed=True):
         # P_icb = self.P(r_i)
         # dTm_dP = (self.T_m(P_icb)-self.T_m(P_icb+dP))/dP
         return p.L_H
@@ -245,7 +249,7 @@ class core_energetics():
             if h == 0.:
                 T_R = 1e99
             else:
-                T_R = self.Q_R(h)/self.E_R(T_cmb, h)
+                T_R = self.Q_R(h, recompute=recompute, store_computed=store_computed)/self.E_R(T_cmb, h, recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.T_R = T_R
             return T_R
@@ -269,7 +273,7 @@ class core_energetics():
         if self.current_values.Qt_s is not None and not recompute:
             return self.current_values.Qt_s
         else:
-            Qt_s = -p.C_p/T_cmb*self.I_s(T_cmb)
+            Qt_s = -p.C_p/T_cmb*self.I_s(T_cmb, recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.Qt_s = Qt_s
             return Qt_s
@@ -278,7 +282,7 @@ class core_energetics():
         if self.current_values.Q_s is not None and not recompute:
             return self.current_values.Q_s
         else:
-            Q_s =  -p.C_p/T_cmb*dT_cmb_dt*self.I_s(T_cmb)
+            Q_s =  -p.C_p/T_cmb*dT_cmb_dt*self.I_s(T_cmb, recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.Q_s = Q_s
             return Q_s
@@ -287,7 +291,7 @@ class core_energetics():
         if self.current_values.Et_s is not None and not recompute:
             return self.current_values.Et_s
         else:
-            Et_s = p.C_p/T_cmb * (self.mass - self.I_s(T_cmb)/T_cmb)
+            Et_s = p.C_p/T_cmb * (self.mass - self.I_s(T_cmb, recompute=recompute, store_computed=store_computed)/T_cmb)
             if store_computed:
                 self.current_values.Et_s = Et_s
             return Et_s
@@ -296,7 +300,7 @@ class core_energetics():
         if self.current_values.E_s is not None and not recompute:
             return self.current_values.E_s
         else:
-            E_s = p.C_p/T_cmb * (self.mass-self.I_s(T_cmb)/T_cmb)*dT_cmb_dt
+            E_s = p.C_p/T_cmb * (self.mass-self.I_s(T_cmb, recompute=recompute, store_computed=store_computed)/T_cmb)*dT_cmb_dt
             if store_computed:
                 self.current_values.E_s = E_s
             return E_s
@@ -314,7 +318,7 @@ class core_energetics():
         if self.current_values.E_R is not None and not recompute:
             return self.current_values.E_R
         else:
-            E_R = (self.mass/T_cmb - self.I_T(T_cmb))*h
+            E_R = (self.mass/T_cmb - self.I_T(T_cmb, recompute=recompute, store_computed=store_computed))*h
             if store_computed:
                 self.current_values.E_R = E_R
             return E_R
@@ -323,8 +327,8 @@ class core_energetics():
         if self.current_values.Qt_L is not None and not recompute:
             return self.current_values.Qt_L
         else:
-            r_i = self.r_i(T_cmb)
-            Qt_L = 4*pi*r_i**2*self.compute_Lhp(T_cmb)*self.rho(r_i)*self.C_r(T_cmb)
+            r_i = self.r_i(T_cmb, recompute=recompute, store_computed=store_computed)
+            Qt_L = 4*pi*r_i**2*self.compute_Lhp(T_cmb, recompute=recompute, store_computed=store_computed)*self.rho(r_i)*self.C_r(T_cmb, recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.Qt_L = Qt_L
             return Qt_L
@@ -333,7 +337,7 @@ class core_energetics():
         if self.current_values.Q_L is not None and not recompute:
             return self.current_values.Q_L
         else:
-            Q_L = self.Qt_L(T_cmb)*dT_cmb_dt
+            Q_L = self.Qt_L(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
             if store_computed:
                 self.current_values.Q_L = Q_L
             return Q_L
@@ -342,8 +346,8 @@ class core_energetics():
         if self.current_values.Et_L is not None and not recompute:
             return self.current_values.Et_L
         else:
-            T_i = self.T_adiabat_from_T_cmb(T_cmb, self.r_i(T_cmb))
-            Et_L = self.Qt_L(T_cmb)*(T_i-T_cmb)/(T_i*T_cmb)
+            T_i = self.T_adiabat_from_T_cmb(T_cmb, self.r_i(T_cmb, recompute=recompute, store_computed=store_computed))
+            Et_L = self.Qt_L(T_cmb, recompute=recompute, store_computed=store_computed)*(T_i-T_cmb)/(T_i*T_cmb)
             if store_computed:
                 self.current_values.Et_L = Et_L
             return Et_L
@@ -352,7 +356,7 @@ class core_energetics():
         if self.current_values.E_L is not None and not recompute:
             return self.current_values.E_L
         else:
-            E_L = self.Et_L(T_cmb)*dT_cmb_dt
+            E_L = self.Et_L(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
             if store_computed:
                 self.current_values.E_L = E_L
             return E_L
@@ -362,7 +366,7 @@ class core_energetics():
             return self.current_values.Qt_g
         else:
             M_oc = self.compute_mass_of_partial_core(p.r_c, self.r_i(T_cmb))
-            Qt_g = (self.I_g(T_cmb)-M_oc*self.phi(self.r_i(T_cmb)))*p.alpha_c*self.C_c(T_cmb)*self.C_r(T_cmb)
+            Qt_g = (self.I_g(T_cmb, recompute=recompute, store_computed=store_computed)-M_oc*self.phi(self.r_i(T_cmb, recompute=recompute, store_computed=store_computed)))*p.alpha_c*self.C_c(T_cmb, recompute=recompute, store_computed=store_computed)*self.C_r(T_cmb, recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.Qt_g = Qt_g
             return Qt_g
@@ -371,7 +375,7 @@ class core_energetics():
         if self.current_values.Q_g is not None and not recompute:
             return self.current_values.Q_g
         else:
-            Q_g = self.Qt_g(T_cmb)*dT_cmb_dt
+            Q_g = self.Qt_g(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
             if store_computed:
                 self.current_values.Q_g = Q_g
             return Q_g
@@ -380,7 +384,7 @@ class core_energetics():
         if self.current_values.Et_g is not None and not recompute:
             return self.current_values.Et_g
         else:
-            Et_g = self.Qt_g(T_cmb)/T_cmb
+            Et_g = self.Qt_g(T_cmb, recompute=recompute, store_computed=store_computed)/T_cmb
             if store_computed:
                 self.current_values.Et_g = Et_g
             return Et_g
@@ -418,7 +422,7 @@ class core_energetics():
         if self.current_values.Qt_T is not None and not recompute:
             return self.current_values.Qt_T
         else:
-            Qt_T = self.Qt_g(T_cmb) + self.Qt_L(T_cmb) + self.Qt_s(T_cmb)
+            Qt_T = self.Qt_g(T_cmb, recompute=recompute, store_computed=store_computed) + self.Qt_L(T_cmb, recompute=recompute, store_computed=store_computed) + self.Qt_s(T_cmb, recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.Qt_T = Qt_T
             return Qt_T
@@ -436,7 +440,7 @@ class core_energetics():
         if self.current_values.Q_cmb is not None and not recompute:
             return self.current_values.Q_cmb
         else:
-            Q_cmb = self.Q_R(h) + self.Qt_T(T_cmb)*dT_cmb_dt
+            Q_cmb = self.Q_R(h, recompute=recompute, store_computed=store_computed) + self.Qt_T(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
             if store_computed:
                 self.current_values.Q_cmb = Q_cmb
             return Q_cmb
@@ -445,7 +449,7 @@ class core_energetics():
         if self.current_values.Delta_E is not None and not recompute:
             return self.current_values.Delta_E
         else:
-            Delta_E = self.E_R(T_cmb, h) + self.Et_T(T_cmb)*dT_cmb_dt - self.E_k()
+            Delta_E = self.E_R(T_cmb, h, recompute=recompute, store_computed=store_computed) + self.Et_T(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt - self.E_k(recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.Delta_E = Delta_E
             return Delta_E
@@ -454,7 +458,7 @@ class core_energetics():
         if self.current_values.E_phi is not None and not recompute:
             return self.current_values.E_phi
         else:
-            Q_phi = self.E_phi(T_cmb, dT_cmb_dt, h)*T_D
+            Q_phi = self.E_phi(T_cmb, dT_cmb_dt, h, recompute=recompute, store_computed=store_computed)*T_D
             if store_computed:
                 self.current_values.Q_phi = Q_phi
             return Q_phi
@@ -463,17 +467,32 @@ class core_energetics():
         if self.current_values.E_phi is not None and not recompute:
             return self.current_values.E_phi
         else:
-            Et_T = self.Et_T(T_cmb)
-            Qt_T = self.Qt_T(T_cmb)
-            T_R = self.T_R(T_cmb, h)
-            Q_cmb = self.Q_cmb(T_cmb, dT_cmb_dt, h)
-            E_phi = (Q_cmb - self.Q_R(h)*(1-Qt_T/Et_T/T_R)) *Et_T/Qt_T - self.E_k()
+            Et_T = self.Et_T(T_cmb, recompute=recompute, store_computed=store_computed)
+            Qt_T = self.Qt_T(T_cmb, recompute=recompute, store_computed=store_computed)
+            T_R = self.T_R(T_cmb, h, recompute=recompute, store_computed=store_computed)
+            Q_cmb = self.Q_cmb(T_cmb, dT_cmb_dt, h, recompute=recompute, store_computed=store_computed)
+            E_phi = (Q_cmb - self.Q_R(h, recompute=recompute, store_computed=store_computed)*(1-Qt_T/Et_T/T_R)) *Et_T/Qt_T - self.E_k(recompute=recompute, store_computed=store_computed)
             if store_computed:
                 self.current_values.E_phi = E_phi
             return E_phi
 
     def core_energy_balance(self, time, T_cmb, Q_cmb):
+        self.reset_current_values()
         Qt_T = self.Qt_T(T_cmb)
         Q_R = self.Q_R(self.heat_production_per_kg(time))
         dT_cmb_dt = (Q_cmb - Q_R)/Qt_T
         return dT_cmb_dt
+
+    def stable_layer_thickness(self, T_cmb, dT_cmb_dt, h):
+        A_cmb = 4*pi*p.r_c**2
+        dTq_dr_cmb = -self.Q_cmb(T_cmb, dT_cmb_dt, h, recompute=True, store_computed=False)/(A_cmb*p.k)
+        dTa_dr_cmb = self.dTa_dr(T_cmb, p.r_c)
+        print('dTq_dr = {0:.2f} K/km'.format(dTq_dr_cmb*1e3))
+        print('dTa_dr = {0:.2f} K/km'.format(dTa_dr_cmb*1e3))
+        D_stable = lambda r: self.dTa_dr(T_cmb, r) + self.Q_cmb(T_cmb, dT_cmb_dt, 0., recompute=True, store_computed=False)/(A_cmb*p.k)
+        if dTq_dr_cmb < dTa_dr_cmb:
+            return p.r_c
+        elif dTq_dr_cmb > 0.:
+            return 0.
+        else:
+            return p.r_c - opt.brentq(D_stable, p.r_c, 0.)
