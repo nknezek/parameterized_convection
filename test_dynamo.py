@@ -7,7 +7,8 @@ Created on Wed Jul 20 22:57:52 2016
 import numpy as np
 import matplotlib.pyplot as plt
 import dynamo_library as dyn
-from imp import reload
+import input_parameters as params
+from importlib import reload
 reload(dyn)
 const_yr_to_sec = 365.25*24.*3600.
 
@@ -36,11 +37,15 @@ dTa_dr_cmbp = 0.76
 P_icbp = 328
 P_cmbp = 139
 
-#%%
-core = dyn.core_energetics(c_0=0.1, T_cmb0=5500.)
+p = params.Stevenson_1983(case=2)
+p.core = params.Nimmo_2015()
+inner_radius = 0.
+outer_radius = p.core.r_c
+r_cmb = p.core.r_c
 T_cmb = 4179.5
-# T_cmb = 4235
-r_cmb = 3480e3
+
+#%%
+core = dyn.core_energetics(inner_radius, outer_radius, params=p)
 dr = 1.
 dT_cmb_dt = dT_cmb_dtp/(const_yr_to_sec*1e9) # K/s
 

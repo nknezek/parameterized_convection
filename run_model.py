@@ -21,11 +21,12 @@ Andrault_f_perioditic = params.Andrault_2011_Stevenson(composition="f_perioditic
 Andrault_a_chondritic = params.Andrault_2011_Stevenson(composition="a_chondritic", Stevenson_case=2)
 # param3layer = Andrault_f_perioditic
 param3layer = Andrault_a_chondritic
+param3layer.core = params.Nimmo_2015()
 
 
 ### Define Earth
 
-Earth = pe.Planet( [ pe.CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
+Earth = pe.Planet( [ dyn.core_energetics( 0.0, param3layer.R_c0, params=param3layer) ,
                   pe.MagmaOceanLayer(param3layer.R_c0, param3layer.R_mo0, params=param3layer),
                   pe.MantleLayer(param3layer.R_mo0, param3layer.R_p0, params=param3layer) ] )
 
@@ -35,7 +36,7 @@ Earth = pe.Planet( [ pe.CoreLayer( 0.0, param3layer.R_c0, params=param3layer) ,
 # T_cmb_initial = 8200. # K
 # T_magma_ocean_initial = 7245. # K
 # T_mantle_initial = 4200. # K
-T_cmb_initial = 5500. # K
+T_cmb_initial = 5200. # K
 # T_magma_ocean_initial = 8400. # K
 # T_mantle_initial = 5200. # K
 
@@ -60,7 +61,7 @@ T_mo = y[::dN,1]
 T_um = y[::dN,2]
 t_sec = t[::dN]
 t_plt = t_sec/(const_yr_to_sec*1e6)
-r_i = np.array([Earth.core_layer.inner_core_radius(T) for T in T_cmb])
+r_i = np.array([Earth.core_layer.r_i(T, recompute=True, store_computed=False) for T in T_cmb])
 
 t_all = np.array(Earth.t_all)/(365.25*24.*3600.*1e6)
 D = np.array(Earth.D_mo)
@@ -72,13 +73,26 @@ D_mo = D_mo_filtered[::dN]
 t_filtered = t_all_filtered[::dN]
 
 ### Plot Results
-peplot.plot_thermal_history2(t_plt, T_cmb, T_um, times_calculated=t_filtered, T_upper_magma_ocean=T_umo, D_magma_ocean=D_mo, r_i=r_i)
+T_i = Earth.core_layer.T_adiabat_from_T_cmb(T_cmb, r_i)
+peplot.plot_thermal_history2(t_plt, T_cmb, T_um, times_calculated=t_filtered, T_upper_magma_ocean=T_umo, D_magma_ocean=D_mo, r_i=r_i, T_i=T_i)
+
+
+### Plot viscosity
+viscosity = Earth.mantle_layer.kinematic_viscosity(T_um)
+plt.figure(figsize=(8,6))
+plt.semilogy(t_plt, viscosity)
+plt.xlabel('time (MYa)')
+plt.ylabel('kinematic viscosity (m^2/s)')
+# plt.ylim([0,np.max(viscosity)*1.1])
+plt.title('viscosity of the mantle over time')
+plt.grid()
+plt.savefig('viscosity.pdf')
 
 
 ## Calculate Solubility and Exsolution
-
 P_cmb = 135e6 # Pa
-initial_concentration = 0.0095
+# initial_concentration = 0.0095
+initial_concentration = 0.0115
 Tin = y[::dN,0]
 Pin = P_cmb*np.ones(len(Tin))
 
@@ -105,31 +119,49 @@ plt.ylabel("Mg Solubility (wt%) or Exsolution Rate (wt%/Bya)")
 # plt.grid()
 plt.title("MgO Solubility and Exsolution".format(T_cmb_initial))
 plt.legend(["MgO solubility - magma ocean", "MgO solubility - MgO layer", "MgO exsolution rate - magma ocean", "MgO exsolution rate - MgO layer", "Initial MgO in core"])
-plt.savefig('Mg_sol_ex.pdf')
+plt.savefig('Mg_sol_ex_Tcmb0_{0:.0f}K.pdf'.format(T_cmb_initial))
+
 
 ## Calculate Dynamo Power
-core_dyn = dyn.core_energetics(c_0 = 0.05, T_cmb0=T_cmb_initial)
-h = np.ones_like(T_cmb)*1e-26
+
 T_D = 5000. # K - from Nimmo 2015
 dT_cmb_dt = np.diff(T_cmb)/np.diff(t_sec)
 Q_phi = np.zeros_like(dT_cmb_dt)
+Q_cmb = np.zeros_like(dT_cmb_dt)
 E_phi = np.zeros_like(dT_cmb_dt)
+E_k = np.zeros_like(dT_cmb_dt)
+Q_k = np.zeros_like(dT_cmb_dt)
+h = Earth.core_layer.heat_production_per_kg(t_sec)
 for i, (T, dT, ht) in enumerate(zip(T_cmb[:-1], dT_cmb_dt, h[:-1])):
-    core_dyn.reset_current_values()
-    Q_phi[i] = core_dyn.Q_phi(T, dT, ht, T_D)
-    E_phi[i] = core_dyn.E_phi(T,dT, ht)
-fig, ax = plt.subplots(1,1,figsize=(8,6))
-ax.plot(t_plt[:-1], Q_phi/1e12, 'b')
-ax.set_ylabel('TW', color='b')
-for tl in ax.get_yticklabels():
+    Earth.core_layer.reset_current_values()
+    Q_phi[i] = Earth.core_layer.Q_phi(T, dT, ht, T_D)
+    Q_cmb[i] = Earth.core_layer.Q_cmb(T, dT, ht)
+    Q_k[i] = Earth.core_layer.Q_k(T)
+    E_phi[i] = Earth.core_layer.E_phi(T,dT, ht)
+    E_k[i] = Earth.core_layer.E_k()
+
+min_E = 200e6 # W/K
+min_Q = min_E*T_D # W
+fig, (ax0, ax1) = plt.subplots(1,2,figsize=(14,6))
+ax0.plot(t_plt[:-1], Q_phi/1e12, 'b-')
+ax0.plot(t_plt[:-1], Q_cmb/1e12, 'b-.')
+ax0.plot(t_plt[:-1], Q_k/1e12, 'b--')
+ax0.plot(t_plt, np.ones_like(t_plt)*min_Q/1e12, color='0.5', alpha=0.5, linewidth=5.)
+ax0.grid()
+ax0.legend(['Q_phi','Q_cmb','Q_k', 'min_Q'])
+ax0.set_ylabel('TW', color='b')
+ax0.set_ylim([-5, 30])
+for tl in ax0.get_yticklabels():
     tl.set_color('b')
-ax1 = ax.twinx()
-ax1.plot(t_plt[:-1], E_phi/1e6, 'g')
+ax1.plot(t_plt[:-1], E_phi/1e6, 'g-')
+ax1.plot(t_plt[:-1], E_k/1e6, 'g--')
+ax1.plot(t_plt, np.ones_like(t_plt)*min_E/1e6, color='0.5', alpha=0.5, linewidth=5.)
 ax1.set_ylabel('MW/K', color='g')
 for tl in ax1.get_yticklabels():
     tl.set_color('g')
-plt.grid()
-plt.savefig('Dynamo_Power_test.pdf')
+ax1.grid()
+ax1.legend(['E_phi','E_k','min_E'])
+plt.savefig('Dynamo_Power_test_Tcmb0_{0:.0f}K.pdf'.format(T_cmb_initial))
 
 # rho_c = 11000
 # delta_rho_c = 500

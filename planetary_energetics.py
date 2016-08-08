@@ -47,7 +47,9 @@ class Planet(object):
             mantle_bottom_flux = self.mantle_layer.lower_boundary_flux( values[2], values[1] )
             dTmagmaocean_dt = self.magma_ocean_layer.magma_ocean_energy_balance(values[1], values[0], mantle_bottom_flux, t)
             magma_ocean_bottom_flux = self.magma_ocean_layer.lower_boundary_flux(values[1], values[0], mantle_bottom_flux)
-            dTcore_dt = self.core_layer.core_energy_balance(values[0], magma_ocean_bottom_flux)
+            # dTcore_dt = self.core_layer.core_energy_balance(values[0], magma_ocean_bottom_flux)
+            self.core_layer.reset_current_values()
+            dTcore_dt = self.core_layer.core_energy_balance(t, values[0], magma_ocean_bottom_flux)
             self.magma_ocean_layer.update_boundary_location(values[1])
             if verbose:
                 print("mantle flux={0:.3f} W/m^2".format(mantle_bottom_flux))
@@ -231,8 +233,8 @@ class CoreLayer(Layer):
         dTdt = -core_flux * core_surface_area / (thermal_energy_change)
         return dTdt
 
-    def ODE( self, T_cmb_initial, cmb_flux ):
-        dTdt = lambda x, t : self.core_energy_balance( x, cmb_flux )
+    def ODE( self, time, T_cmb_initial, cmb_flux ):
+        dTdt = lambda x, t : self.core_energy_balance(time, x, cmb_flux )
         return dTdt
 
 class MagmaOceanLayer(Layer):
@@ -398,7 +400,7 @@ class MagmaOceanLayer(Layer):
             dTdt = (internal_heat_energy - net_flux_out)/(effective_heat_capacity - latent_heat)
             # print("dTdt={0:.3e} K, dTdt_a={1:.3e} K".format(dTdt, ))
         else:
-            dTdt = self.planet.core_layer.core_energy_balance(T_cmb, mantle_bottom_flux)
+            dTdt = self.planet.core_layer.core_energy_balance(time, T_cmb, mantle_bottom_flux)
         return dTdt
 
     def ODE( self, D_magma_ocean_initial, T_mag):

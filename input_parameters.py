@@ -14,6 +14,7 @@ class Stevenson_1983(Parameters) :
         self.R_c0 = 3485e3 # - [m] from self pg. 474
         self.g = 10. # - [m/s^2] from self Table II
         self.T_s = 293. # - [K] from self Table II
+        # self.T_s = 593. # - [K] modification
 
         self.mantle = Parameters('Stevenson_1983, for mantle')
         self.mantle.mu = 1.3 # - [] from self pg. 473 and Table II
@@ -25,8 +26,10 @@ class Stevenson_1983(Parameters) :
         self.mantle.C = self.mantle.rhoC/self.mantle.rho # - [J/K-kg]
         self.mantle.Q_0 = 1.7e-7 # - [W/m^3] from self Table I
         self.mantle.lam = 1.38e-17 # - [1/s] from self Table I
-        self.mantle.A = 5.2e4 # - [K] from self Table I
-        self.mantle.nu_0 = 4.0e3 # - [m^2/s] from self Table I
+        # self.mantle.A = 5.2e4 # - [K] from self Table I
+        self.mantle.A = 2.8e4 # - [K] guess
+        # self.mantle.nu_0 = 4.0e3 # - [m^2/s] from self Table I
+        self.mantle.nu_0 = 12e8 # - [m^2/s] guess
         self.mantle.Ra_crit = 5e2 # - [] from self Table I
         self.mantle.beta = 0.3 # - [] from self Table I
         self.mantle.g = self.g # - [m/s^2] from self Table II
@@ -183,3 +186,43 @@ class Andrault_2011_Driscoll(Driscoll_2014):
             self.magma_ocean.c3_liq = 1.844 # - [] from Moneteux 2016 (13) citing Andrault 2011
         else:
             raise ValueError("Composition for Andrault_2011 must be f_perioditic or a_chondrtic")
+
+class Nimmo_2015(Parameters):
+    def __init__(self):
+        source = 'Nimmo 2015'
+        super(Nimmo_2015,self).__init__(source)
+        self.rho_cen = 12500 # kg / m^3
+        self.rho_0 = 7900 # kg/m^3
+
+        self.r_c = 3480e3 # m
+        self.r_i = 1220e3 # m
+
+        self.K_0 = 500e9 # Pa
+        self.L = 7272e3 # m
+
+        self.P_c = 139e9 # Pa
+        self.P_icb = 328e9 # Pa
+
+        self.T_c = 4180 # K
+        self.T_i = 5508 # K
+        self.T_cen = 5726 # K
+        self.T_m0 = 2677 # K
+        self.T_m1 = 2.95e-12 # /Pa
+        self.T_m2 = 8.37e-25 # /Pa^2
+
+        self.alpha = 1.25e-5 # /K
+        self.L_H = 750e3 # J/kg
+        self.k = 130 # W/m-K
+        # self.k = 120 # W/m-K
+        self.D = 6203e3 # m
+        self.D_k = 5900e3 # pg. 42
+        self.C_p = 840 # J/kg-K
+        self.alpha_c = 1.1 # -
+        self.delta_rho_c = 560 # kg/m^3
+        self.C_r = -10100 # m/K
+        self.G = 6.67408e-11 # m^3/kg-s
+        # self.h_0 = 1.e-11 # - [W/kg] similar to Stevenson Table I
+        self.h_0 = 1.e-31 # - [W/kg] similar to Stevenson Table I
+        self.lam = 1.38e-17 # - [1/s] from Stevenson Table I
+
+        self.alpha_m = 1.12 # - [] from O'Rourke and Stevenson 2015
