@@ -1633,9 +1633,9 @@ class CoreLayer_Custom(CoreLayer_Nimmo):
             if self.current_values.dMoles_dT is not None and not recompute:
                 dMoles_dT = self.current_values.dMoles_dT
             else:
-                dMoles_dT = self.planet.reactions.dMoles_dT(Moles, T_cmb, dKs_dT=dKs_dT)
-                if store_computed:
-                    self.current_values.dMoles_dT = dMoles_dT
+                dMoles_dT = self.planet.reactions.dMoles_dT(Moles, T_cmb, dKs_dT=dKs_dT, dTdt=1e12) #HACK for erosion
+                # if store_computed:
+                    # self.current_values.dMoles_dT = dMoles_dT
 
             # compute C_m dependent on solubility of X_Mg compared to current X_Mg
             # 0 if X_Mg_sol > X_Mg, convert to wt% MgO if X_Mg_sol < X_Mg
@@ -1672,9 +1672,9 @@ class CoreLayer_Custom(CoreLayer_Nimmo):
             if self.current_values.dMoles_dT is not None and not recompute:
                 dMoles_dT = self.current_values.dMoles_dT
             else:
-                dMoles_dT = self.planet.reactions.dMoles_dT(Moles, T_cmb, dKs_dT=dKs_dT)
-                if store_computed:
-                    self.current_values.dMoles_dT = dMoles_dT
+                dMoles_dT = self.planet.reactions.dMoles_dT(Moles, T_cmb, dKs_dT=dKs_dT, dTdt=1e12) #HACK for erosion
+                # if store_computed:
+                    # self.current_values.dMoles_dT = dMoles_dT
 
             # compute C_m dependent on solubility of X_Mg compared to current X_Mg
             # 0 if X_Mg_sol > X_Mg, convert to wt% MgO if X_Mg_sol < X_Mg
@@ -1711,9 +1711,9 @@ class CoreLayer_Custom(CoreLayer_Nimmo):
             if self.current_values.dMoles_dT is not None and not recompute:
                 dMoles_dT = self.current_values.dMoles_dT
             else:
-                dMoles_dT = self.planet.reactions.dMoles_dT(Moles, T_cmb, dKs_dT=dKs_dT)
-                if store_computed:
-                    self.current_values.dMoles_dT = dMoles_dT
+                dMoles_dT = self.planet.reactions.dMoles_dT(Moles, T_cmb, dKs_dT=dKs_dT, dTdt=1e12) #HACK for erosion
+                # if store_computed:
+                    # self.current_values.dMoles_dT = dMoles_dT
 
             # compute C_m dependent on solubility of X_Mg compared to current X_Mg
             # 0 if X_Mg_sol > X_Mg, convert to wt% MgO if X_Mg_sol < X_Mg

@@ -504,7 +504,7 @@ class Reactions():
         Moles = list(np.array([0,0,0,0,0, X_MgO, X_SiO2, X_FeO, X_MgSiO3, X_FeSiO3, 1])*M_m)
         return Moles
 
-    def erode_term(self, M_i, M_i_0, M_m_0):
+    def erode_term(self, M_i, M_i_0, d=None, tau=None):
         ''' Layer erosion term given current and initial number of moles of species i and initial total moles in the layer
 
         :param M_i:
@@ -513,8 +513,10 @@ class Reactions():
         :return:
         '''
         pr =self.params.reactions
-        d = pr.d
-        tau = pr.tau
+        if d is None:
+            d = pr.d
+        if tau is None:
+            tau = pr.tau
         return np.sign(M_i_0 - M_i) * M_i_0 / tau * ((np.abs(M_i - M_i_0) / M_i_0 + 1)**d-1)
 
     def X2M_m(self, X_i_m):
@@ -564,7 +566,7 @@ class Reactions():
         M_i_c.append(M_c)
         return M_i_c
 
-    def dMi_b(self, Moles, dTdt):
+    def dMi_b(self, Moles=None, dTdt=None):
         '''compute the erosion term incorporated directly into the equations
 
         :param Moles:
@@ -574,12 +576,20 @@ class Reactions():
         pr = self.params.reactions
         M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = self.unwrap_Moles(Moles)
         M_Mg_b, M_Si_b, M_Fe_b, M_O_b, M_c_b, M_MgO_b, M_SiO2_b, M_FeO_b, M_MgSiO3_b, M_FeSiO3_b, M_m_b = self.unwrap_Moles(pr.Moles_0)
-        dM_MgO_dt_b = self.erode_term(M_MgO, M_MgO_b, M_m_b)
-        dM_SiO2_dt_b = self.erode_term(M_SiO2, M_SiO2_b, M_m_b)
-        dM_FeO_dt_b = self.erode_term(M_FeO, M_FeO_b, M_m_b)
-        dM_MgSiO3_dt_b = self.erode_term(M_MgSiO3, M_MgSiO3_b, M_m_b)
-        dM_FeSiO3_dt_b = self.erode_term(M_FeSiO3, M_FeSiO3_b, M_m_b)
-        return [dM_MgO_dt_b, dM_SiO2_dt_b, dM_FeO_dt_b, dM_MgSiO3_dt_b, dM_FeSiO3_dt_b]
+        dM_MgO_dt_b = -self.erode_term(M_MgO, M_MgO_b)/dTdt
+        dM_SiO2_dt_b = -self.erode_term(M_SiO2, M_SiO2_b)/dTdt
+        dM_FeO_dt_b = -self.erode_term(M_FeO, M_FeO_b)/dTdt
+        dM_MgSiO3_dt_b = -self.erode_term(M_MgSiO3, M_MgSiO3_b)/dTdt
+        dM_FeSiO3_dt_b = -self.erode_term(M_FeSiO3, M_FeSiO3_b)/dTdt
+
+        # mantle visibility correction
+        tau_m = pr.tau/100
+        dM_MgO_dt_b += -self.erode_term(M_m, M_m_b, tau=tau_m)/dTdt*M_MgO/M_m
+        dM_SiO2_dt_b += -self.erode_term(M_m, M_m_b, tau=tau_m)/dTdt*M_SiO2/M_m
+        dM_FeO_dt_b += -self.erode_term(M_m, M_m_b, tau=tau_m)/dTdt*M_FeO/M_m
+        dM_MgSiO3_dt_b += -self.erode_term(M_m, M_m_b, tau=tau_m)/dTdt*M_MgSiO3/M_m
+        dM_FeSiO3_dt_b += -self.erode_term(M_m, M_m_b, tau=tau_m)/dTdt*M_FeSiO3/M_m
+        return [0,0,0,0,0,dM_MgO_dt_b, dM_SiO2_dt_b, dM_FeO_dt_b, dM_MgSiO3_dt_b, dM_FeSiO3_dt_b,0]
 
     def dMi_dt_erode(self, Moles):
         '''calculate the erosion rate for each molar species in the mantle layer
@@ -607,7 +617,7 @@ class Reactions():
         dM_FeSiO3_dt_e = self.erode_term(M_FeSiO3, M_FeSiO3_b, M_m_b)
         return [dM_MgO_dt_e, dM_SiO2_dt_e, dM_FeO_dt_e, dM_MgSiO3_dt_e, dM_FeSiO3_dt_e]
 
-    def dMoles_dT(self, Moles=None, T_cmb=None, dKs_dT=None):
+    def dMoles_dT(self, Moles=None, T_cmb=None, dKs_dT=None, dTdt=None, dMi_b=None):
         '''calcluate the change in Moles vs temperature T for each molar species in the core and mantle
 
         :param Moles:
@@ -617,20 +627,22 @@ class Reactions():
         '''
         if dKs_dT is None:
             dKs_dT = self.compute_dKs_dT(Moles=Moles, T_cmb=T_cmb)
+        if dMi_b is None:
+            dMi_b = self.dMi_b(Moles=Moles, dTdt=dTdt)
 
         # core
-        dM_Mg_dT = self.dM_Mg_dTc(Moles, dKs_dT)
-        dM_Si_dT = self.dM_Si_dTc(Moles, dKs_dT)
-        dM_Fe_dT = self.dM_Fe_dTc(Moles, dKs_dT)
-        dM_O_dT = self.dM_O_dTc(Moles, dKs_dT)
+        dM_Mg_dT = self.dM_Mg_dTc(Moles, dKs_dT, dMi_b)
+        dM_Si_dT = self.dM_Si_dTc(Moles, dKs_dT, dMi_b)
+        dM_Fe_dT = self.dM_Fe_dTc(Moles, dKs_dT, dMi_b)
+        dM_O_dT = self.dM_O_dTc(Moles, dKs_dT, dMi_b)
         dM_c_dT = np.sum([dM_Mg_dT, dM_Si_dT, dM_Fe_dT, dM_O_dT])
 
         # mantle
-        dM_MgO_dT = self.dM_MgO_dTc(Moles, dKs_dT)
-        dM_SiO2_dT = self.dM_SiO2_dTc(Moles, dKs_dT)
-        dM_FeO_dT = self.dM_FeO_dTc(Moles, dKs_dT)
-        dM_MgSiO3_dT = self.dM_MgSiO3_dTc(Moles, dKs_dT)
-        dM_FeSiO3_dT = self.dM_FeSiO3_dTc(Moles, dKs_dT)
+        dM_MgO_dT = self.dM_MgO_dTc(Moles, dKs_dT, dMi_b)
+        dM_SiO2_dT = self.dM_SiO2_dTc(Moles, dKs_dT, dMi_b)
+        dM_FeO_dT = self.dM_FeO_dTc(Moles, dKs_dT, dMi_b)
+        dM_MgSiO3_dT = self.dM_MgSiO3_dTc(Moles, dKs_dT, dMi_b)
+        dM_FeSiO3_dT = self.dM_FeSiO3_dTc(Moles, dKs_dT, dMi_b)
         dM_m_dT = np.sum([dM_MgO_dT, dM_FeO_dT, dM_SiO2_dT, dM_MgSiO3_dT, dM_FeSiO3_dT])
         return [dM_Mg_dT, dM_Si_dT, dM_Fe_dT, dM_O_dT, dM_c_dT, dM_MgO_dT, dM_SiO2_dT, dM_FeO_dT, dM_MgSiO3_dT,
                 dM_FeSiO3_dT, dM_m_dT]
@@ -644,9 +656,8 @@ class Reactions():
         :return:
         '''
         if dMoles_dT is None:
-            dMoles_dT = self.dMoles_dT(Moles, T_cmb, dKs_dT=dKs_dT)
+            dMoles_dT = self.dMoles_dT(Moles=Moles, T_cmb=T_cmb, dKs_dT=dKs_dT, dTdt=dTc_dt)
 
-        dM_MgO_dt_e, dM_SiO2_dt_e, dM_FeO_dt_e, dM_MgSiO3_dt_e, dM_FeSiO3_dt_e = self.dMi_dt_erode(Moles)
         dM_Mg_dT, dM_Si_dT, dM_Fe_dT, dM_O_dT, dM_c_dT, dM_MgO_dT, dM_SiO2_dT, \
                 dM_FeO_dT, dM_MgSiO3_dT, dM_FeSiO3_dT, dM_m_dT = self.unwrap_Moles(dMoles_dT)
         # core
@@ -657,2773 +668,4873 @@ class Reactions():
         dM_c_dt = np.sum([dM_Mg_dt, dM_Si_dt, dM_Fe_dt, dM_O_dt])
 
         # mantle
-        dM_MgO_dt = dM_MgO_dT*dTc_dt + dM_MgO_dt_e
-        dM_SiO2_dt = dM_SiO2_dT * dTc_dt + dM_SiO2_dt_e
-        dM_FeO_dt = dM_FeO_dT * dTc_dt + dM_FeO_dt_e
-        dM_MgSiO3_dt = dM_MgSiO3_dT * dTc_dt + dM_MgSiO3_dt_e
-        dM_FeSiO3_dt = dM_FeSiO3_dT * dTc_dt + dM_FeSiO3_dt_e
+        dM_MgO_dt = dM_MgO_dT*dTc_dt
+        dM_SiO2_dt = dM_SiO2_dT * dTc_dt
+        dM_FeO_dt = dM_FeO_dT * dTc_dt
+        dM_MgSiO3_dt = dM_MgSiO3_dT * dTc_dt
+        dM_FeSiO3_dt = dM_FeSiO3_dT * dTc_dt
         dM_m_dt = np.sum([dM_MgO_dt, dM_SiO2_dt, dM_FeO_dt, dM_MgSiO3_dt, dM_FeSiO3_dt])
         return [dM_Mg_dt, dM_Si_dt, dM_Fe_dt, dM_O_dt, dM_c_dt, dM_MgO_dt, dM_SiO2_dt, dM_FeO_dt, dM_MgSiO3_dt, dM_FeSiO3_dt, dM_m_dt]
 
-    def dM_SiO2_dTc(self, Moles, dKs):
+    def dM_MgSiO3_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
         M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
         dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_SiO2 * (M_Fe * dKFeO_KFeO * (
-        M_Mg * M_O * M_m * (-4 * M_FeO * M_MgSiO3 + 4 * M_FeSiO3 * M_MgO) + M_Si * (M_Mg * (
-        M_O * (M_FeO * (-6 * M_MgSiO3 + 6 * M_m) + M_FeSiO3 * (-9 * M_FeO - 3 * M_MgO + 15 * M_m)) + M_m * (
-        -M_FeO * M_MgSiO3 + M_FeSiO3 * M_MgO)) + M_O * (M_MgO * (
-        6 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO + 15 * M_m)) + M_MgSiO3 * (
-                                                        M_FeO * (-9 * M_MgO + 6 * M_m) + M_FeSiO3 * (
-                                                        -9 * M_FeO - 9 * M_MgO + 15 * M_m)))) + M_c * (
-        M_Mg * (M_FeO * M_MgSiO3 * M_m + M_FeSiO3 * (-M_MgO * M_m + M_O * (M_FeO + M_MgO - M_m))) + M_O * (
-        M_FeSiO3 * M_MgO * (M_FeO - M_m) + M_MgSiO3 * (M_FeO * M_MgO + M_FeSiO3 * (M_FeO + M_MgO - M_m))) + M_Si * (
-        M_Mg * (M_FeO * (2 * M_MgSiO3 - 2 * M_m) + M_FeSiO3 * (4 * M_FeO + 2 * M_MgO - 6 * M_m) + M_O * (
-        M_FeO + M_FeSiO3)) + M_MgO * (-2 * M_FeO * M_m + M_FeSiO3 * (4 * M_FeO - 6 * M_m)) + M_MgSiO3 * (
-        M_FeO * (4 * M_MgO - 2 * M_m) + M_FeSiO3 * (4 * M_FeO + 4 * M_MgO - 6 * M_m)) + M_O * (
-        M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (M_FeO + M_FeSiO3))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (M_O * M_m * (
-        M_Fe * M_FeO * (4 * M_MgO + 4 * M_MgSiO3) + M_Mg * (
-        M_Fe * (4 * M_FeO + 4 * M_MgO) + M_FeO * (4 * M_MgO + 4 * M_MgSiO3))) + M_Si * (M_Fe * (
-        M_FeO * M_m * (M_MgO + M_MgSiO3) + M_O * (
-        M_MgO * (-3 * M_FeO + 15 * M_m) + M_MgSiO3 * (-3 * M_FeO - 9 * M_MgO + 15 * M_m))) + M_FeO * M_O * M_m * (
-                                                                                        9 * M_MgO + 9 * M_MgSiO3) + M_Mg * (
-                                                                                        M_Fe * (M_O * (
-                                                                                        -3 * M_FeO - 3 * M_MgO + 15 * M_m) + M_m * (
-                                                                                                M_FeO + M_MgO)) + M_FeO * (
-                                                                                        M_O * (
-                                                                                        -3 * M_MgO + 6 * M_MgSiO3 + 9 * M_m) + M_m * (
-                                                                                        M_MgO + M_MgSiO3)))) + M_c * (
-                                                                                                        M_Fe * (
-                                                                                                        M_FeO * M_m * (
-                                                                                                        -M_MgO - M_MgSiO3) + M_O * (
-                                                                                                        M_MgO * (
-                                                                                                        M_FeO - M_m) + M_MgSiO3 * (
-                                                                                                        M_FeO + M_MgO - M_m))) + M_FeO * M_O * M_m * (
-                                                                                                        -M_MgO - M_MgSiO3) + M_Mg * (
-                                                                                                        M_Fe * (M_O * (
-                                                                                                        M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                                -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                        M_O * (
-                                                                                                        M_MgO - M_m) + M_m * (
-                                                                                                        -M_MgO - M_MgSiO3))) + M_Si * (
-                                                                                                        M_Fe * (
-                                                                                                        M_MgO * (
-                                                                                                        2 * M_FeO - 6 * M_m) + M_MgSiO3 * (
-                                                                                                        2 * M_FeO + 4 * M_MgO - 6 * M_m) + M_O * (
-                                                                                                        M_MgO + M_MgSiO3)) + M_FeO * M_m * (
-                                                                                                        -4 * M_MgO - 4 * M_MgSiO3) + M_Mg * (
-                                                                                                        M_Fe * (
-                                                                                                        2 * M_FeO + 2 * M_MgO + M_O - 6 * M_m) + M_FeO * (
-                                                                                                        2 * M_MgO - 2 * M_MgSiO3 - 4 * M_m))))) + M_Mg * dKMgO_KMgO * (
-                         M_Fe * M_O * M_m * (4 * M_FeO * M_MgSiO3 - 4 * M_FeSiO3 * M_MgO) + M_Si * (M_Fe * (M_O * (
-                         M_MgO * (-6 * M_FeSiO3 + 6 * M_m) + M_MgSiO3 * (-3 * M_FeO - 9 * M_MgO + 15 * M_m)) + M_m * (
-                                                                                                            M_FeO * M_MgSiO3 - M_FeSiO3 * M_MgO)) + M_O * (
-                                                                                                    M_MgO * (
-                                                                                                    6 * M_FeO * M_m + M_FeSiO3 * (
-                                                                                                    -9 * M_FeO + 6 * M_m)) + M_MgSiO3 * (
+        return M_MgSiO3 * (M_Fe * (M_O * (M_FeO * (M_MgO * (M_SiO2 * (
+        4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                            -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                   -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+        M_SiO2 * (4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                                         M_SiO2 * (
+                                                                                                         4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                         4.0 * dM_FeO_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                         -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er))) + dKFeO_KFeO * (
+                                   M_Mg * M_O * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                   M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                   -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Si * (M_Mg * (
+                                   M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                   M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                   M_FeO * (2.0 * M_SiO2 + 10.0 * M_m) + M_FeSiO3 * (
+                                   -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m))) + M_MgO * M_O * (M_FeO * (
+                                   3.0 * M_SiO2 + 6.0 * M_m) + M_FeSiO3 * (-6.0 * M_SiO2 + 15.0 * M_m))) + M_c * (
+                                   M_Mg * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                   M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) + M_O * (
+                                   M_FeO + M_MgO - M_m) - M_SiO2 * M_m)) + M_MgO * M_O * (
+                                   -M_FeO * M_SiO2 - M_FeSiO3 * M_m) + M_Si * (M_Mg * (
+                                   M_FeO * (-M_SiO2 - 3.0 * M_m) + M_FeSiO3 * (
+                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                   M_FeO + M_FeSiO3)) + M_MgO * (M_FeO * (-2.0 * M_SiO2 - 2.0 * M_m) + M_FeSiO3 * (
+                                   2.0 * M_SiO2 - 6.0 * M_m)))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (M_O * (
+        M_Fe * M_FeO * M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_Mg * (M_Fe * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+        -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeO * M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m))) + M_Si * (
+                                                                                                   M_Mg * (M_Fe * (
+                                                                                                   M_FeO * (
+                                                                                                   -M_SiO2 + M_m) + M_MgO * (
+                                                                                                   -M_SiO2 + M_m) + M_O * (
+                                                                                                   -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_SiO2 * M_m) + M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -M_SiO2 + M_m) + M_O * (
+                                                                                                           -9.0 * M_MgO - 6.0 * M_SiO2 + 15.0 * M_m))) + M_MgO * (
+                                                                                                   M_Fe * (M_FeO * (
+                                                                                                   -M_SiO2 + M_m) + M_O * (
+                                                                                                           -9.0 * M_FeO - 6.0 * M_SiO2 + 15.0 * M_m)) + M_FeO * M_O * (
+                                                                                                   -9.0 * M_SiO2 + 9.0 * M_m))) + M_c * (
+                                                                                                   M_Mg * (M_Fe * (
+                                                                                                   M_FeO * (
+                                                                                                   M_SiO2 - M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_O * (
+                                                                                                   M_FeO + M_MgO - M_m) - M_SiO2 * M_m) + M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           M_SiO2 - M_m) + M_O * (
+                                                                                                           M_MgO - M_m))) + M_MgO * (
+                                                                                                   M_Fe * (M_FeO * (
+                                                                                                   M_SiO2 - M_m) + M_O * (
+                                                                                                           M_FeO - M_m)) + M_FeO * M_O * (
+                                                                                                   M_SiO2 - M_m)) + M_Si * (
+                                                                                                   M_Mg * (M_Fe * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_O + M_SiO2 - 9.0 * M_m) + M_FeO * (
+                                                                                                           4.0 * M_MgO + 2.0 * M_SiO2 - 6.0 * M_m)) + M_MgO * (
+                                                                                                   M_Fe * (
+                                                                                                   4.0 * M_FeO + 2.0 * M_SiO2 - 6.0 * M_m) + M_FeO * (
+                                                                                                   4.0 * M_SiO2 - 4.0 * M_m))))) + M_Mg * (
+                           M_O * (M_Fe * (M_FeO * (M_SiO2 * (
+                           4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                   -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_MgO * (
+                                          M_SiO2 * (
+                                          4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                          -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                          -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_FeO * (
+                                  M_MgO * (M_SiO2 * (
+                                  4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                           -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                  -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                           M_SiO2 * (4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                           -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                           4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                              4.0 * dM_FeO_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                        -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er))) + dKMgO_KMgO * (
+                           M_Fe * M_O * (-4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                           M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Si * (M_Fe * (
+                           -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                           M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                           M_FeO * (M_SiO2 - 4.0 * M_m) + M_FeSiO3 * (
+                           9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m) + M_MgO * (
+                           3.0 * M_SiO2 + 6.0 * M_m) - 9.0 * M_SiO2 * M_m)) + M_O * (M_FeO * (
+                           M_MgO * (3.0 * M_SiO2 + 6.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                           9.0 * M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                  3.0 * M_SiO2 + 6.0 * M_m) - 9.0 * M_SiO2 * M_m))) + M_c * (
+                           M_Fe * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                           M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                   M_FeSiO3 * (-M_FeO - M_MgO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m))) + M_O * (
+                           M_FeO * M_SiO2 * (-M_MgO + M_m) + M_FeSiO3 * (
+                           M_FeO * (-M_SiO2 + M_m) + M_SiO2 * (-M_MgO + M_m))) + M_Si * (M_Fe * (
+                           M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (
+                           -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_MgO * (
+                           -2.0 * M_SiO2 - 2.0 * M_m) + M_O * (
+                           -M_FeO - M_FeSiO3 - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_FeO * (M_MgO * (
+                           -2.0 * M_SiO2 - 2.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                          -2.0 * M_SiO2 - 2.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                         M_FeO * (
+                                                                                         -M_SiO2 + M_m) + M_FeSiO3 * (
+                                                                                         -M_SiO2 + M_m)))))) + M_Si * (
+                           M_Fe * (M_FeO * (M_MgO * (
+                           M_SiO2 * (dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                           -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                            -dM_MgO_er - dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                           M_SiO2 * (dM_MgO_er + dM_MgSiO3_er) + M_m * (-dM_MgO_er - dM_MgSiO3_er)) + M_MgO * (
+                                                                                      M_SiO2 * (
+                                                                                      1.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                                                      1.0 * dM_FeO_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                      -dM_MgO_er - dM_MgSiO3_er)) + M_O * (
+                                   M_FeO * (M_MgO * (
+                                   6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                            dM_MgO_er + dM_MgSiO3_er) + M_m * (
+                                            -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+                                   M_FeO * (9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_MgO * (
+                                   6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 15.0 * dM_MgO_er + 24.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                   4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                                   -25.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                                   6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 18.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_m * (
+                                                                                        -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                   -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er))) + M_Mg * (M_Fe * (M_FeO * (
+                           M_SiO2 * (dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                           -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                           dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                    -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_O * (
+                                                                                              M_FeO * (
+                                                                                              6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_MgO * (
+                                                                                              6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                              4.0 * dM_FeO_er + 10.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 10.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_m * (
+                                                                                              -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                              -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_FeO * (
+                                                                                      M_MgO * (M_SiO2 * (
+                                                                                      dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                               -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                      -1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                                      M_FeO * (M_SiO2 * (
+                                                                                      1.0 * dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                               -1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                      M_SiO2 * (
+                                                                                      dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                      1.0 * dM_FeO_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                      -1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_O * (
+                                                                                      M_FeO * (M_MgO * (
+                                                                                      6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                               6.0 * dM_FeO_er + 12.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 10.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_m * (
+                                                                                               -15.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                      M_FeO * (
+                                                                                      -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er) + M_MgO * (
+                                                                                      -3.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                      6.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 10.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_m * (
+                                                                                      15.0 * dM_FeO_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er)))) + M_O * (
+                           M_FeO * (M_MgO * (M_SiO2 * (
+                           9.0 * dM_FeO_er + 18.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 18.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_m * (
+                                             -9.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                    -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                           M_SiO2 * (9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_m * (
+                           -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                           9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 18.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_m * (
+                                                                              9.0 * dM_FeO_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                          -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er))) + dKSiO2_KSiO2 * (
+                           M_O * (M_Fe * M_MgO * (
+                           M_FeO * (-2.0 * M_SiO2 - 4.0 * M_m) + M_FeSiO3 * (4.0 * M_SiO2 - 10.0 * M_m)) + M_Mg * (
+                                  M_Fe * (M_FeO * (-2.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                  -2.0 * M_SiO2 - 4.0 * M_m) + 6.0 * M_SiO2 * M_m) + M_FeO * (
+                                  M_MgO * (-2.0 * M_SiO2 - 4.0 * M_m) + 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                  M_FeO * (-6.0 * M_SiO2 + 6.0 * M_m) + M_MgO * (
+                                  -2.0 * M_SiO2 - 4.0 * M_m) + 6.0 * M_SiO2 * M_m))) + M_c * (M_Mg * (M_Fe * (
+                           M_FeO * (M_SiO2 + M_m) + M_MgO * (M_SiO2 + M_m) + M_O * (
+                           -M_FeO - M_MgO + M_m) - 2.0 * M_SiO2 * M_m) + M_FeO * (M_MgO * (
+                           M_SiO2 + M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                           2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (M_SiO2 + M_m) - 2.0 * M_SiO2 * M_m) + M_O * (M_FeO * (
+                           -M_MgO + M_m) + M_FeSiO3 * (-M_MgO + M_m))) + M_MgO * (M_Fe * (
+                           M_FeO * (M_SiO2 + M_m) + M_FeSiO3 * (-M_SiO2 + 3.0 * M_m) + M_O * (
+                           -M_FeO - M_FeSiO3 - M_SiO2 + M_m)) + M_O * (M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (
+                           -M_SiO2 + M_m)))))) + M_c * (M_Fe * (M_FeO * (M_MgO * (
+        M_SiO2 * (-dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+        M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+        -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                            -dM_FeO_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                              dM_MgO_er + dM_MgSiO3_er)) + M_O * (
+                                                                M_FeO * (M_MgO * (
+                                                                -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_SiO2 * (
+                                                                         -dM_MgO_er - dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                M_FeO * (-dM_MgO_er - dM_MgSiO3_er) + M_MgO * (
+                                                                -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                dM_MgO_er + dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                                                                -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                      dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                dM_MgO_er + dM_MgSiO3_er))) + M_Mg * (M_Fe * (M_FeO * (
+        M_SiO2 * (-dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+        -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                              dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_O * (
+                                                                                                              M_FeO * (
+                                                                                                              -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                                                                                                              -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                              dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                              dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_FeO * (
+                                                                                                      M_MgO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                      dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                      dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                      dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -1.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                      -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                      dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_O * (
+                                                                                                      M_FeO * (M_MgO * (
+                                                                                                      -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      dM_FeO_er + dM_FeSiO3_er) + M_MgO * (
+                                                                                                      dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                      -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er)))) + M_O * (
+                                                        M_FeO * (M_MgO * (M_SiO2 * (
+                                                        -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                 dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                                                        M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                        dM_MgO_er + dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                                                        -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                              -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                          dM_MgO_er + dM_MgSiO3_er))) + M_Si * (
+                                                        M_Fe * (M_FeO * (M_MgO * (
+                                                        -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                         -dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                         dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                M_FeO * (
+                                                                -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                -dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                M_SiO2 * (
+                                                                -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_O * (
+                                                                M_FeO * (-dM_MgO_er - dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                -dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                                                                -dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                dM_MgO_er + dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_FeO * (
+                                                        M_MgO * (M_SiO2 * (
+                                                        -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                 4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                        4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                                                        M_SiO2 * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                                        4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                                                        -4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                          -4.0 * dM_FeO_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                             4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_Mg * (
+                                                        M_Fe * (M_FeO * (
+                                                        -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_MgO * (
+                                                                -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_FeO * (
+                                                        M_MgO * (
+                                                        -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                        -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                        6.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                        M_FeO * (4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_MgO * (
+                                                        2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                        -2.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                        -6.0 * dM_FeO_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_O * (
+                                                        M_FeO * (dM_FeO_er + dM_FeSiO3_er) + M_FeSiO3 * (
+                                                        dM_FeO_er + dM_FeSiO3_er))) + M_O * (M_FeO * (
+                                                        M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                        dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (M_SiO2 * (
+                                                        -dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                                                 dM_MgO_er + dM_MgSiO3_er))))) + dKMgSiO3_KMgSiO3 * (
+                           M_O * (M_Fe * M_MgO * (-4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                           M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Mg * (M_Fe * (M_FeSiO3 * (
+                           M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                       -4.0 * M_FeO - 4.0 * M_MgO)) + M_MgO * (
+                                                                                               -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                               M_FeO * (
+                                                                                               4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)))) + M_Si * (
+                           M_Mg * (M_Fe * (
+                           M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                           M_FeO * (M_SiO2 - 4.0 * M_m) + M_FeSiO3 * (
+                           9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m) + M_MgO * (
+                           M_SiO2 - 4.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (
+                                   -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                   M_FeO * (M_MgO * (M_SiO2 - 4.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                   M_FeO * (9.0 * M_MgO + 9.0 * M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                   M_SiO2 - 4.0 * M_m) - 9.0 * M_SiO2 * M_m))) + M_MgO * (M_Fe * (
+                           -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                           M_FeO * (M_SiO2 - 4.0 * M_m) + M_FeSiO3 * (
+                           9.0 * M_FeO + 4.0 * M_SiO2 - 25.0 * M_m) - 9.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                          -9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                          M_FeO * (
+                                                                                          9.0 * M_SiO2 - 9.0 * M_m) - 9.0 * M_SiO2 * M_m)))) + M_c * (
+                           M_Mg * (M_Fe * (
+                           M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                           M_FeSiO3 * (-M_FeO - M_MgO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m)) + M_SiO2 * M_m * (
+                           M_FeO + M_MgO)) + M_MgO * (
+                                   M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                   M_FeO * M_SiO2 * (-M_MgO + M_m) + M_FeSiO3 * (
+                                   M_FeO * (-M_MgO - M_SiO2 + M_m) + M_SiO2 * (-M_MgO + M_m)))) + M_MgO * (M_Fe * (
+                           M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                           M_FeSiO3 * (-M_FeO + M_m) + M_SiO2 * (-M_FeO + M_m))) + M_O * (
+                                                                                                           M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m))) + M_Si * (
+                           M_Mg * (M_Fe * (M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (
+                           -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_MgO * (-M_SiO2 + M_m) + M_O * (
+                                           -M_FeO - M_FeSiO3 - M_MgO - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                   M_MgO * (-M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                   M_FeO * (-4.0 * M_MgO - 4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                   -M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_O * (
+                                   M_FeO * (-M_MgO - M_SiO2 + M_m) + M_FeSiO3 * (-M_MgO - M_SiO2 + M_m))) + M_MgO * (
+                           M_Fe * (M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (-4.0 * M_FeO - M_SiO2 + 9.0 * M_m) + M_O * (
+                           -M_FeO - M_FeSiO3 - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + 4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                           M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_O * (
+                           M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (-M_SiO2 + M_m))))))) / (M_O * (M_Fe * (M_MgO * (
+        4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+        -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+        M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+        -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+                                                                                         M_Fe * (M_MgO * (
+                                                                                         M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (M_MgO * (
+                                                                                                 -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -M_SiO2 + M_m) + M_MgO * (
+                                                                                                 -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                                 M_MgO * (M_FeO * (
+                                                                                                 -M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                          -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                 -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                                 -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+                                                                                         M_Fe * (M_FeSiO3 * (M_FeO * (
+                                                                                         -M_SiO2 + M_m) + M_MgO * (
+                                                                                                             -M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -M_SiO2 + M_m) + M_MgO * (
+                                                                                                 -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                                                                 M_FeO * (
+                                                                                                 -M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                 -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                                 -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                                                                                                 -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                 M_FeO + M_MgO)) + M_MgO * (
+                                                                                         M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (M_MgO * (
+                                                                                         -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -M_SiO2 + M_m) + M_MgO * (
+                                                                                         -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                         M_FeO * (M_MgO * (
+                                                                                         -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                         -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+                                                                                         -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (
+                                                                                         M_MgO * (
+                                                                                         9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (M_MgO * (
+                                                                                         -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                         -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+                                                                                         M_Fe * (M_MgO * (
+                                                                                         -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (M_MgO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 M_SiO2 - M_m) + M_MgO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                                 M_MgO * (M_FeSiO3 * (
+                                                                                                 M_FeO - M_m) + M_SiO2 * (
+                                                                                                          M_FeO - M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 M_MgO + M_SiO2) + M_FeSiO3 * (
+                                                                                                 M_FeO + M_MgO - M_m) + M_MgO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (
+                                                                                         M_Fe * (M_FeSiO3 * (M_FeO * (
+                                                                                         M_SiO2 - M_m) + M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 M_SiO2 - M_m) + M_MgO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                                                                                 M_FeSiO3 * (
+                                                                                                 M_FeO + M_MgO - M_m) + M_MgSiO3 * (
+                                                                                                 M_FeO + M_MgO - M_m) + M_SiO2 * (
+                                                                                                 M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
+                                                                                                 -M_FeO - M_MgO)) + M_MgO * (
+                                                                                         -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (M_MgO * (
+                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_SiO2 - M_m) + M_MgO * (
+                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                         M_FeO * M_SiO2 * (
+                                                                                         M_MgO - M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_MgO - M_m) + M_FeSiO3 * (
+                                                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+                                                                                         M_MgO * (
+                                                                                         -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (M_MgO * (
+                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_SiO2 - M_m) + M_MgO * (
+                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (
+                                                                                         M_Fe * (M_MgO * (M_FeO * (
+                                                                                         M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                          4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                 4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                 4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                 M_MgO * (
+                                                                                                 M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                 M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                         M_Fe * (M_FeO * (
+                                                                                         M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                 4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                 M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                 4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                 M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                         M_MgO * (
+                                                                                         M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                         M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                         4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                         M_FeO * (
+                                                                                         M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                         M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                         M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                         -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (M_MgO * (
+                                                                                         4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                         4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                         M_MgO * (M_FeO * (
+                                                                                         M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                  M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                         M_SiO2 - M_m))))))
+
+    def dM_MgO_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
+        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
+        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
+        return M_MgO * (M_Fe * (M_O * (M_FeO * M_SiO2 * M_m * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_FeSiO3 * (
+        M_FeO * (M_SiO2 * (4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+        -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_SiO2 * M_m * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                                       M_FeO * (M_SiO2 * (
+                                       -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                       M_SiO2 * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                       -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)))) + dKFeO_KFeO * (
+                                M_Mg * M_O * (
+                                M_FeO * (M_MgSiO3 * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Si * (M_Mg * (
+                                M_FeO * (M_MgSiO3 * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                M_FeO * (-9.0 * M_MgSiO3 - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                -9.0 * M_FeO + 2.0 * M_SiO2 + 10.0 * M_m))) + M_MgSiO3 * M_O * (M_FeO * (
+                                -3.0 * M_SiO2 - 6.0 * M_m) + M_FeSiO3 * (6.0 * M_SiO2 - 15.0 * M_m))) + M_c * (M_Mg * (
+                                M_FeO * (M_MgSiO3 * (M_SiO2 - M_m) + M_O * (
+                                M_FeSiO3 + M_MgSiO3 + M_SiO2) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * M_O * (
+                                                                                                               M_FeO * M_SiO2 + M_FeSiO3 * M_m) + M_Si * (
+                                                                                                               M_Mg * (
+                                                                                                               M_FeO * (
+                                                                                                               4.0 * M_MgSiO3 + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                               4.0 * M_FeO - M_SiO2 - 3.0 * M_m) + M_O * (
+                                                                                                               M_FeO + M_FeSiO3)) + M_MgSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               2.0 * M_SiO2 + 2.0 * M_m) + M_FeSiO3 * (
+                                                                                                               -2.0 * M_SiO2 + 6.0 * M_m)))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                        M_O * (M_Fe * M_FeO * M_MgSiO3 * (4.0 * M_SiO2 - 4.0 * M_m) + M_Mg * (
+                        4.0 * M_Fe * M_SiO2 * M_m + M_FeO * M_MgSiO3 * (4.0 * M_SiO2 - 4.0 * M_m))) + M_Si * (M_Mg * (
+                        M_Fe * (M_O * (2.0 * M_SiO2 + 10.0 * M_m) + M_SiO2 * M_m) + M_FeO * (
+                        M_MgSiO3 * (M_SiO2 - M_m) + M_O * (9.0 * M_MgSiO3 + 3.0 * M_SiO2 + 6.0 * M_m))) + M_MgSiO3 * (
+                                                                                                              M_Fe * (
+                                                                                                              M_FeO * (
+                                                                                                              M_SiO2 - M_m) + M_O * (
+                                                                                                              9.0 * M_FeO + 6.0 * M_SiO2 - 15.0 * M_m)) + M_FeO * M_O * (
+                                                                                                              9.0 * M_SiO2 - 9.0 * M_m))) + M_c * (
+                        M_Mg * (-M_Fe * M_SiO2 * M_m + M_FeO * (
+                        M_MgSiO3 * (-M_SiO2 + M_m) + M_O * (-M_MgSiO3 - M_SiO2))) + M_MgSiO3 * (
+                        M_Fe * (M_FeO * (-M_SiO2 + M_m) + M_O * (-M_FeO + M_m)) + M_FeO * M_O * (
+                        -M_SiO2 + M_m)) + M_Si * (M_Mg * (M_Fe * (M_O - M_SiO2 - 3.0 * M_m) + M_FeO * (
+                        -4.0 * M_MgSiO3 - 2.0 * M_SiO2 - 2.0 * M_m)) + M_MgSiO3 * (
+                                                  M_Fe * (-4.0 * M_FeO - 2.0 * M_SiO2 + 6.0 * M_m) + M_FeO * (
+                                                  -4.0 * M_SiO2 + 4.0 * M_m))))) + M_Mg * (M_O * (M_Fe * (M_FeSiO3 * (
+        M_SiO2 * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_MgSiO3 * (M_SiO2 * (
+        -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                              -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                          -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_FeO * M_SiO2 * M_m * (
+                                                                                                  -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                                                  M_FeO * (M_SiO2 * (
+                                                                                                  4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                           -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                  -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                                                                  M_FeO * (M_SiO2 * (
+                                                                                                  -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                           4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                  M_SiO2 * (
+                                                                                                  -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                  -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)))) + dKMgO_KMgO * (
+                                                                                           M_Fe * M_O * (M_FeO * (
+                                                                                           M_MgSiO3 * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                         M_FeO * (
+                                                                                                         4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Si * (
+                                                                                           M_Fe * (M_FeO * (M_MgSiO3 * (
+                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                   M_FeO * (
+                                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                                                                                   M_FeO * (
+                                                                                                   M_SiO2 - 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                   9.0 * M_FeO + 4.0 * M_SiO2 - 25.0 * M_m) + M_MgSiO3 * (
+                                                                                                   9.0 * M_FeO + 6.0 * M_SiO2 - 15.0 * M_m) - 9.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           -9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           9.0 * M_SiO2 - 9.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           6.0 * M_SiO2 - 15.0 * M_m) + M_FeSiO3 * (
+                                                                                           6.0 * M_SiO2 - 15.0 * M_m)))) + M_c * (
+                                                                                           M_Fe * (M_FeO * (M_MgSiO3 * (
+                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                   M_FeO * (
+                                                                                                   -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                                                                   M_FeSiO3 * (
+                                                                                                   -M_FeO + M_m) + M_MgSiO3 * (
+                                                                                                   -M_FeO + M_m) + M_SiO2 * (
+                                                                                                   -M_FeO + M_m))) + M_O * (
+                                                                                           M_FeSiO3 * (M_FeO * (
+                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_m * (
+                                                                                           M_FeO * M_SiO2 + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_Si * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           -M_SiO2 + M_m) + M_FeSiO3 * (
+                                                                                                   -4.0 * M_FeO - M_SiO2 + 9.0 * M_m) + M_MgSiO3 * (
+                                                                                                   -4.0 * M_FeO - 2.0 * M_SiO2 + 6.0 * M_m) + M_O * (
+                                                                                                   -M_FeO - M_FeSiO3 - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + 4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -2.0 * M_SiO2 + 6.0 * M_m) + M_FeSiO3 * (
+                                                                                           -2.0 * M_SiO2 + 6.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           -M_SiO2 + M_m) + M_FeSiO3 * (
+                                                                                           -M_SiO2 + M_m)))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                        M_O * (M_Fe * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Mg * (
+                               M_FeSiO3 * (M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                               4.0 * M_Fe + 4.0 * M_FeO))) + M_Si * (M_Fe * (
+                        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                        M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                        -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_Mg * (M_Fe * (
+                        M_O * (2.0 * M_SiO2 + 10.0 * M_m) + M_SiO2 * M_m) + M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (
+                        -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (M_FeO * (2.0 * M_SiO2 + 10.0 * M_m) + M_FeSiO3 * (
+                        -9.0 * M_FeO + 2.0 * M_SiO2 + 10.0 * M_m))) + M_O * (9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                        M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_c * (M_Fe * (
+                        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                        M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m))) + M_Mg * (M_FeSiO3 * (
+                        M_FeO * (M_O + M_SiO2 - M_m) - M_SiO2 * M_m) + M_SiO2 * M_m * (-M_Fe - M_FeO)) + M_O * (
+                                                                                             -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                             M_FeO * (
+                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m)) + M_Si * (
+                                                                                             M_Fe * (M_FeO * (
+                                                                                             M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                     4.0 * M_FeO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                     M_FeO + M_FeSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) - 4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                             M_FeO * (
+                                                                                             4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_Mg * (
+                                                                                             M_Fe * (
+                                                                                             M_O - M_SiO2 - 3.0 * M_m) + M_FeO * (
+                                                                                             -M_SiO2 - 3.0 * M_m) + M_FeSiO3 * (
+                                                                                             4.0 * M_FeO - M_SiO2 - 3.0 * M_m) + M_O * (
+                                                                                             M_FeO + M_FeSiO3)) + M_O * (
+                                                                                             M_FeO * (
+                                                                                             M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                             M_SiO2 - M_m))))) + M_Si * (
+                        M_Fe * (M_FeO * M_SiO2 * M_m * (-dM_MgO_er - dM_MgSiO3_er) + M_FeSiO3 * (M_FeO * (
+                        M_SiO2 * (dM_MgO_er + dM_MgSiO3_er) + M_m * (-dM_MgO_er - dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                 -dM_MgO_er - dM_MgSiO3_er)) + M_MgSiO3 * (
+                                M_FeO * (M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                M_SiO2 * (-1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er))) + M_O * (M_FeO * (
+                        M_SiO2 * (dM_MgO_er + dM_MgSiO3_er) + M_m * (
+                        -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                        9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                              4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                              -25.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                  -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_m * (
+                                                                                                  6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er + 9.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                  -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er))) + M_Mg * (
+                        M_Fe * (M_FeSiO3 * (
+                        M_SiO2 * (-1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                        -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                M_SiO2 * (-1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_O * (M_FeSiO3 * (
+                        -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                                                 -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                 -2 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                 -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_FeO * M_SiO2 * M_m * (
+                        -1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_FeSiO3 * (M_FeO * (
+                        M_SiO2 * (1.0 * dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                        -1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                             -1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                        M_FeO * (
+                        M_SiO2 * (-dM_FeO_er - 2.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                        1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                        M_SiO2 * (-1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                        -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er))) + M_O * (M_FeO * (M_SiO2 * (
+                        -3.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                   -6.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                          M_FeO * (
+                                                                                          -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                                          -3.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                          6.0 * dM_FeO_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                          M_FeO * (
+                                                                                          -15.0 * dM_FeO_er - 24.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                          -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)))) + M_O * (
+                        M_FeO * M_SiO2 * M_m * (-9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_FeSiO3 * (M_FeO * (
+                        M_SiO2 * (9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_m * (
+                        -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                     -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                        M_FeO * (M_SiO2 * (
+                        -9.0 * dM_FeO_er - 18.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_m * (
+                                 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er + 9.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                        M_SiO2 * (-9.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_m * (
+                        -9.0 * dM_FeO_er - 9.0 * dM_MgO_er + 9.0 * dM_SiO2_er)))) + dKSiO2_KSiO2 * (M_O * (
+                        M_Fe * M_MgSiO3 * (
+                        M_FeO * (2.0 * M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (-4.0 * M_SiO2 + 10.0 * M_m)) + M_Mg * (M_Fe * (
+                        M_FeSiO3 * (-4.0 * M_SiO2 + 10.0 * M_m) + M_MgSiO3 * (
+                        -4.0 * M_SiO2 + 10.0 * M_m) + 6.0 * M_SiO2 * M_m) + 6.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                                M_FeO * (
+                                                                                                                -6.0 * M_SiO2 + 6.0 * M_m) + 6.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                                M_FeO * (
+                                                                                                                -4.0 * M_SiO2 + 10.0 * M_m) + M_FeSiO3 * (
+                                                                                                                -4.0 * M_SiO2 + 10.0 * M_m)))) + M_c * (
+                                                                                                    M_Mg * (M_Fe * (
+                                                                                                    M_FeSiO3 * (
+                                                                                                    M_SiO2 - 3.0 * M_m) + M_MgSiO3 * (
+                                                                                                    M_SiO2 - 3.0 * M_m) + M_O * (
+                                                                                                    M_FeSiO3 + M_MgSiO3 + M_SiO2) - 2.0 * M_SiO2 * M_m) - 2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                            M_FeO * (
+                                                                                                            2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                            M_FeO * (
+                                                                                                            M_SiO2 - 3.0 * M_m) + M_FeSiO3 * (
+                                                                                                            M_SiO2 - 3.0 * M_m)) + M_O * (
+                                                                                                            M_MgSiO3 * (
+                                                                                                            M_FeO + M_FeSiO3) + M_SiO2 * (
+                                                                                                            M_FeO + M_FeSiO3))) + M_MgSiO3 * (
+                                                                                                    M_Fe * (M_FeO * (
+                                                                                                    -M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                            M_SiO2 - 3.0 * M_m) + M_O * (
+                                                                                                            M_FeO + M_FeSiO3 + M_SiO2 - M_m)) + M_O * (
                                                                                                     M_FeO * (
-                                                                                                    -9 * M_MgO + 15 * M_m) + M_FeSiO3 * (
-                                                                                                    -9 * M_FeO - 9 * M_MgO + 15 * M_m)))) + M_c * (
+                                                                                                    M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)))))) + M_c * (
+                        M_Fe * (M_FeO * M_SiO2 * M_m * (dM_MgO_er + dM_MgSiO3_er) + M_FeSiO3 * (M_FeO * (
+                        M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (
+                                M_FeO * (M_SiO2 * (
+                                dM_FeO_er + 2.0 * dM_FeSiO3_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                         -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er)) + M_FeSiO3 * (
+                                M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er))) + M_O * (M_FeSiO3 * (
+                        M_FeO * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                        dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                              dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_SiO2 * (
+                                                                                                              dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                              -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er)) + M_SiO2 * (
+                                                                                     M_FeO * (
+                                                                                     -dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                                     dM_MgO_er + dM_MgSiO3_er)))) + M_Mg * (
+                        M_Fe * (M_FeSiO3 * (M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_O * (
+                                M_FeSiO3 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_MgSiO3 * (
+                                dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_SiO2 * (
+                                dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_FeO * M_SiO2 * M_m * (
+                        dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_FeSiO3 * (M_FeO * (
+                        M_SiO2 * (-dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                        dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                      dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                        M_FeO * (M_SiO2 * (dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        -1.0 * dM_FeSiO3_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                        M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er))) + M_O * (
+                        M_FeO * M_SiO2 * (dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+                        M_FeO * (dM_FeO_er + dM_FeSiO3_er) + M_SiO2 * (
+                        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                        M_FeO * (dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+                        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)))) + M_O * (
+                        M_FeO * M_SiO2 * M_m * (dM_MgO_er + dM_MgSiO3_er) + M_FeSiO3 * (M_FeO * (
+                        M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                                        dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (
+                        M_FeO * (M_SiO2 * (dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er)) + M_FeSiO3 * (
+                        M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er + dM_MgO_er - dM_SiO2_er)))) + M_Si * (M_Fe * (
+                        M_FeO * (M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (
+                        M_FeO * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                        9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                        2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                             2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                             2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                             -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_O * (
+                        M_FeO * (-dM_MgO_er - dM_MgSiO3_er) + M_FeSiO3 * (-dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                        -dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                        4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_FeO * M_SiO2 * M_m * (
+                                                                         4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                         M_FeO * (M_SiO2 * (
+                                                                         -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                  4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                                                                         4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_Mg * (
+                                                                         M_Fe * (M_FeSiO3 * (
+                                                                         2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                                 2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                 dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                 dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_FeO * (
+                                                                         M_SiO2 * (
+                                                                         2 * dM_FeO_er + 4.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                         2.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                         M_FeO * (
+                                                                         4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                         2.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                         -2.0 * dM_FeO_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                         M_FeO * (
+                                                                         6.0 * dM_FeO_er + 10.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                         2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_O * (
+                                                                         M_FeO * (
+                                                                         dM_FeO_er + dM_FeSiO3_er) + M_FeSiO3 * (
+                                                                         dM_FeO_er + dM_FeSiO3_er))) + M_MgSiO3 * (
+                                                                         M_FeO * (M_SiO2 * (
+                                                                         4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                  -4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                         M_SiO2 * (
+                                                                         4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                         4.0 * dM_FeO_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er))) + M_O * (
+                                                                         M_FeO * (
+                                                                         M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                         dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                         M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                         dM_MgO_er + dM_MgSiO3_er)))))) / (M_O * (
+        M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                     M_FeO * (
+                                                                                     -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                     -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                     4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                             4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                             M_FeO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                             M_FeO * (M_MgO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                             M_FeO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+                                                                                                           M_Fe * (
+                                                                                                           M_MgO * (
+                                                                                                           M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + M_m) + M_MgO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                           -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+                                                                                                           M_Fe * (
+                                                                                                           M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + M_m) + M_MgO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + M_m) + M_MgO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                                           -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                                                                                                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                           M_FeO + M_MgO)) + M_MgO * (
+                                                                                                           M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 + M_m) + M_MgO * (
+                                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                                           -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+                                                                                                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+                                                                                                           M_Fe * (
+                                                                                                           M_MgO * (
+                                                                                                           -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           M_FeSiO3 * (
+                                                                                                           M_FeO - M_m) + M_SiO2 * (
+                                                                                                           M_FeO - M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO + M_SiO2) + M_FeSiO3 * (
+                                                                                                           M_FeO + M_MgO - M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (
+                                                                                                           M_Fe * (
+                                                                                                           M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                                                                                           M_FeSiO3 * (
+                                                                                                           M_FeO + M_MgO - M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO + M_MgO - M_m) + M_SiO2 * (
+                                                                                                           M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
+                                                                                                           -M_FeO - M_MgO)) + M_MgO * (
+                                                                                                           -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                                           M_FeO * M_SiO2 * (
+                                                                                                           M_MgO - M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                                                                           M_MgO - M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO - M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO + M_MgO - M_m)))) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (
+                                                                                                           M_Fe * (
+                                                                                                           M_MgO * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                           4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                                           M_Fe * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                           M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                           M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                           M_SiO2 - M_m))))))
+
+    def dM_SiO2_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
+        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
+        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
+        return M_SiO2 * (M_Fe * (M_O * (M_MgO * (
+        M_FeO * M_m * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_FeSiO3 * (
+        M_FeO * (-4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+        4.0 * dM_FeO_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er))) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+        -4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                 -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                 4.0 * dM_FeO_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)))) + dKFeO_KFeO * (
+                                 M_Mg * M_O * M_m * (-4.0 * M_FeO * M_MgSiO3 + 4.0 * M_FeSiO3 * M_MgO) + M_Si * (
+                                 M_Mg * (M_O * (M_FeO * (-6.0 * M_MgSiO3 + 6.0 * M_m) + M_FeSiO3 * (
+                                 -9.0 * M_FeO - 3.0 * M_MgO + 15.0 * M_m)) + M_m * (
+                                         -M_FeO * M_MgSiO3 + M_FeSiO3 * M_MgO)) + M_O * (
+                                 M_MgO * (6.0 * M_FeO * M_m + M_FeSiO3 * (-9.0 * M_FeO + 15.0 * M_m)) + M_MgSiO3 * (
+                                 M_FeO * (-9.0 * M_MgO + 6.0 * M_m) + M_FeSiO3 * (
+                                 -9.0 * M_FeO - 9.0 * M_MgO + 15.0 * M_m)))) + M_c * (M_Mg * (
+                                 M_FeO * M_MgSiO3 * M_m + M_FeSiO3 * (
+                                 -M_MgO * M_m + M_O * (M_FeO + M_MgO - M_m))) + M_O * (M_FeSiO3 * M_MgO * (
+                                 M_FeO - M_m) + M_MgSiO3 * (M_FeO * M_MgO + M_FeSiO3 * (
+                                 M_FeO + M_MgO - M_m))) + M_Si * (M_Mg * (
+                                 M_FeO * (2.0 * M_MgSiO3 - 2.0 * M_m) + M_FeSiO3 * (
+                                 4.0 * M_FeO + 2.0 * M_MgO - 6.0 * M_m) + M_O * (M_FeO + M_FeSiO3)) + M_MgO * (
+                                                                  -2.0 * M_FeO * M_m + M_FeSiO3 * (
+                                                                  4.0 * M_FeO - 6.0 * M_m)) + M_MgSiO3 * (
+                                                                  M_FeO * (4.0 * M_MgO - 2.0 * M_m) + M_FeSiO3 * (
+                                                                  4.0 * M_FeO + 4.0 * M_MgO - 6.0 * M_m)) + M_O * (
+                                                                  M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
+                                                                  M_FeO + M_FeSiO3)))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                         M_O * M_m * (M_Fe * M_FeO * (4.0 * M_MgO + 4.0 * M_MgSiO3) + M_Mg * (
+                         M_Fe * (4.0 * M_FeO + 4.0 * M_MgO) + M_FeO * (4.0 * M_MgO + 4.0 * M_MgSiO3))) + M_Si * (
+                         M_Fe * (M_FeO * M_m * (M_MgO + M_MgSiO3) + M_O * (
+                         M_MgO * (-3.0 * M_FeO + 15.0 * M_m) + M_MgSiO3 * (
+                         -3.0 * M_FeO - 9.0 * M_MgO + 15.0 * M_m))) + M_FeO * M_O * M_m * (
+                         9.0 * M_MgO + 9.0 * M_MgSiO3) + M_Mg * (
+                         M_Fe * (M_O * (-3.0 * M_FeO - 3.0 * M_MgO + 15.0 * M_m) + M_m * (M_FeO + M_MgO)) + M_FeO * (
+                         M_O * (-3.0 * M_MgO + 6.0 * M_MgSiO3 + 9.0 * M_m) + M_m * (M_MgO + M_MgSiO3)))) + M_c * (
+                         M_Fe * (M_FeO * M_m * (-M_MgO - M_MgSiO3) + M_O * (
+                         M_MgO * (M_FeO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m))) + M_FeO * M_O * M_m * (
+                         -M_MgO - M_MgSiO3) + M_Mg * (
+                         M_Fe * (M_O * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_FeO * (
+                         M_O * (M_MgO - M_m) + M_m * (-M_MgO - M_MgSiO3))) + M_Si * (M_Fe * (
+                         M_MgO * (2.0 * M_FeO - 6.0 * M_m) + M_MgSiO3 * (
+                         2.0 * M_FeO + 4.0 * M_MgO - 6.0 * M_m) + M_O * (M_MgO + M_MgSiO3)) + M_FeO * M_m * (
+                                                                                     -4.0 * M_MgO - 4.0 * M_MgSiO3) + M_Mg * (
+                                                                                     M_Fe * (
+                                                                                     2.0 * M_FeO + 2.0 * M_MgO + M_O - 6.0 * M_m) + M_FeO * (
+                                                                                     2.0 * M_MgO - 2.0 * M_MgSiO3 - 4.0 * M_m))))) + M_Mg * (
+                         M_O * (M_Fe * (M_FeSiO3 * (M_FeO * (
+                         -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                    -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                                    4.0 * dM_FeO_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                        M_FeO * (
+                                        -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                        -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                        4.0 * dM_FeO_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_m * (M_FeO * (
+                         -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                        -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er))) + M_MgO * (
+                                M_FeO * M_m * (
+                                -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_FeSiO3 * (M_FeO * (
+                                -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                           4.0 * dM_FeO_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                M_FeO * (M_MgO * (
+                                -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                         -4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                M_FeO * (
+                                -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                4.0 * dM_FeO_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)))) + dKMgO_KMgO * (
+                         M_Fe * M_O * M_m * (4.0 * M_FeO * M_MgSiO3 - 4.0 * M_FeSiO3 * M_MgO) + M_Si * (M_Fe * (M_O * (
+                         M_MgO * (-6.0 * M_FeSiO3 + 6.0 * M_m) + M_MgSiO3 * (
+                         -3.0 * M_FeO - 9.0 * M_MgO + 15.0 * M_m)) + M_m * (
+                                                                                                                M_FeO * M_MgSiO3 - M_FeSiO3 * M_MgO)) + M_O * (
+                                                                                                        M_MgO * (
+                                                                                                        6.0 * M_FeO * M_m + M_FeSiO3 * (
+                                                                                                        -9.0 * M_FeO + 6.0 * M_m)) + M_MgSiO3 * (
+                                                                                                        M_FeO * (
+                                                                                                        -9.0 * M_MgO + 15.0 * M_m) + M_FeSiO3 * (
+                                                                                                        -9.0 * M_FeO - 9.0 * M_MgO + 15.0 * M_m)))) + M_c * (
                          M_Fe * (
                          M_FeSiO3 * M_MgO * M_m + M_MgSiO3 * (-M_FeO * M_m + M_O * (M_FeO + M_MgO - M_m))) + M_O * (
                          M_FeO * M_FeSiO3 * M_MgO + M_MgSiO3 * (
                          M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_FeO + M_MgO - M_m))) + M_Si * (M_Fe * (
-                         M_MgO * (2 * M_FeSiO3 - 2 * M_m) + M_MgSiO3 * (2 * M_FeO + 4 * M_MgO - 6 * M_m) + M_O * (
-                         M_MgO + M_MgSiO3)) + M_MgO * (-2 * M_FeO * M_m + M_FeSiO3 * (
-                         4 * M_FeO - 2 * M_m)) + M_MgSiO3 * (M_FeO * (4 * M_MgO - 6 * M_m) + M_FeSiO3 * (
-                         4 * M_FeO + 4 * M_MgO - 6 * M_m)) + M_O * (M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
-                         M_FeO + M_FeSiO3))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_O * M_m * (
-        M_Fe * M_MgO * (4 * M_FeO + 4 * M_FeSiO3) + M_Mg * (
-        M_Fe * (4 * M_FeO + 4 * M_MgO) + M_MgO * (4 * M_FeO + 4 * M_FeSiO3))) + M_Si * (M_Mg * (
-        M_Fe * (M_O * (-3 * M_FeO - 3 * M_MgO + 15 * M_m) + M_m * (M_FeO + M_MgO)) + M_MgO * M_m * (
-        M_FeO + M_FeSiO3) + M_O * (
-        M_FeO * (-3 * M_MgO + 15 * M_m) + M_FeSiO3 * (-9 * M_FeO - 3 * M_MgO + 15 * M_m))) + M_MgO * (M_Fe * (
-        M_O * (-3 * M_FeO + 6 * M_FeSiO3 + 9 * M_m) + M_m * (M_FeO + M_FeSiO3)) + M_O * M_m * (
-                                                                                                      9 * M_FeO + 9 * M_FeSiO3))) + M_c * (
-                                                                                M_Mg * (M_Fe * (
-                                                                                M_O * (M_FeO + M_MgO - M_m) + M_m * (
-                                                                                -M_FeO - M_MgO)) + M_MgO * M_m * (
-                                                                                        -M_FeO - M_FeSiO3) + M_O * (
-                                                                                        M_FeO * (
-                                                                                        M_MgO - M_m) + M_FeSiO3 * (
-                                                                                        M_FeO + M_MgO - M_m))) + M_MgO * (
-                                                                                M_Fe * (M_O * (M_FeO - M_m) + M_m * (
-                                                                                -M_FeO - M_FeSiO3)) + M_O * M_m * (
-                                                                                -M_FeO - M_FeSiO3)) + M_Si * (M_Mg * (
-                                                                                M_Fe * (
-                                                                                2 * M_FeO + 2 * M_MgO + M_O - 6 * M_m) + M_FeO * (
-                                                                                2 * M_MgO - 6 * M_m) + M_FeSiO3 * (
-                                                                                4 * M_FeO + 2 * M_MgO - 6 * M_m) + M_O * (
-                                                                                M_FeO + M_FeSiO3)) + M_MgO * (M_Fe * (
-                                                                                2 * M_FeO - 2 * M_FeSiO3 - 4 * M_m) + M_m * (
-                                                                                                              -4 * M_FeO - 4 * M_FeSiO3))))) + M_Si * dKSiO2_KSiO2 * (
-                         M_O * (M_Fe * (M_MgO * (-4 * M_FeO * M_m + M_FeSiO3 * (6 * M_FeO - 10 * M_m)) + M_MgSiO3 * (
-                         M_FeO * (6 * M_MgO - 4 * M_m) + M_FeSiO3 * (6 * M_FeO + 6 * M_MgO - 10 * M_m))) + M_Mg * (
-                                M_Fe * (M_FeSiO3 * (6 * M_FeO + 6 * M_MgO - 10 * M_m) + M_MgSiO3 * (
-                                6 * M_FeO + 6 * M_MgO - 10 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO)) + M_MgO * (
-                                -4 * M_FeO * M_m + M_FeSiO3 * (6 * M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                M_FeO * (6 * M_MgO - 10 * M_m) + M_FeSiO3 * (
-                                6 * M_FeO + 6 * M_MgO - 10 * M_m)))) + M_c * (M_Fe * (
-                         M_MgO * (M_FeO * M_m + M_FeSiO3 * (-2 * M_FeO + 3 * M_m)) + M_MgSiO3 * (
-                         M_FeO * (-2 * M_MgO + M_m) + M_FeSiO3 * (-2 * M_FeO - 2 * M_MgO + 3 * M_m)) + M_O * (
-                         M_MgO * (-M_FeO + M_m) + M_MgSiO3 * (-M_FeO + M_m))) + M_Mg * (M_Fe * (
-                         M_FeSiO3 * (-2 * M_FeO - 2 * M_MgO + 3 * M_m) + M_MgSiO3 * (
-                         -2 * M_FeO - 2 * M_MgO + 3 * M_m) + M_O * (-M_FeO - M_MgO + M_m) + M_m * (
-                         M_FeO + M_MgO)) + M_MgO * (M_FeO * M_m + M_FeSiO3 * (-2 * M_FeO + M_m)) + M_MgSiO3 * (M_FeO * (
-                         -2 * M_MgO + 3 * M_m) + M_FeSiO3 * (-2 * M_FeO - 2 * M_MgO + 3 * M_m)) + M_O * (M_FeO * (
-                         -M_MgO + M_m) + M_FeSiO3 * (-M_MgO + M_m))) + M_O * M_m * (
-                                                                              M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
-                                                                              M_FeO + M_FeSiO3))))) / (M_O * (M_Fe * (
-        M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-        M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-        4 * M_FeO + 4 * M_MgO)) + M_MgO * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (M_FeO * (
-        4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-        M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-        M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-        4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                           4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                           -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                           -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (
-                                                                                        M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                            M_FeO + M_MgO)) + M_MgSiO3 * (
-                                                                                                M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                M_FeO + M_MgO)) + M_O * (
-                                                                                                M_FeSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + 9 * M_m) + M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                                M_FeO + M_MgO)) + M_MgO * (
-                                                                                        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        M_FeO * M_m + M_SiO2 * (
-                                                                                        -M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                        M_FeO + M_MgO))) + M_O * (
-                                                                                        M_FeO * (
-                                                                                        4 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_MgO * (
-                                                                                        -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                        -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
-                                                                                        M_MgO * (
-                                                                                        9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_SiO2 * (
-                                                                                        -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        9 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                        9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                                                                                                       M_Fe * (M_MgO * (
-                                                                                                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                       -M_FeO * M_m + M_SiO2 * (
-                                                                                                       M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_FeO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_MgO * (
-                                                                                                               M_FeO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                                       M_Fe * (
-                                                                                                       M_FeSiO3 * (
-                                                                                                       M_SiO2 * (
-                                                                                                       M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                       -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                                       M_SiO2 * (
-                                                                                                       M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                       -M_FeO - M_MgO)) + M_O * (
-                                                                                                       M_FeSiO3 * (
-                                                                                                       M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                                       M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                                       M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                                       -M_FeO - M_MgO)) + M_MgO * (
-                                                                                                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                       -M_FeO * M_m + M_SiO2 * (
-                                                                                                       M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                       M_FeO * (
-                                                                                                       -M_MgO * M_m + M_SiO2 * (
-                                                                                                       M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                       M_SiO2 * (
-                                                                                                       M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                       -M_FeO - M_MgO))) + M_O * (
-                                                                                                       M_FeO * M_SiO2 * (
-                                                                                                       M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                       M_FeO * (
-                                                                                                       M_MgO - M_m) + M_SiO2 * (
-                                                                                                       M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                                       M_FeO * (
-                                                                                                       M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                       M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                                       M_MgO * (
-                                                                                                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                       -M_FeO * M_m + M_SiO2 * (
-                                                                                                       M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                       M_FeO * (
-                                                                                                       -M_MgO * M_m + M_SiO2 * (
-                                                                                                       M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                       M_SiO2 * (
-                                                                                                       M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                       -M_FeO - M_MgO)))) + M_Si * (
-                                                                                                       M_Fe * (M_MgO * (
-                                                                                                       -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                       4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                                       M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                                               4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                       M_Fe * (
-                                                                                                       M_FeSiO3 * (
-                                                                                                       4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                       4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                       M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                       M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                       -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                       -M_MgO * M_m + M_SiO2 * (
-                                                                                                       M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                       -4 * M_FeO * M_m + M_MgO * (
-                                                                                                       4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                       4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                       M_FeO * (
-                                                                                                       4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                       4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                       M_FeO * (
-                                                                                                       M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                       M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                       M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                       -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                       -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                       4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                       M_FeO * (
-                                                                                                       -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                       4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                       M_SiO2 * (
-                                                                                                       4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                       -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                       M_MgO * (
-                                                                                                       M_FeO * (
-                                                                                                       M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                       M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                       M_FeO * (
-                                                                                                       M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                       M_SiO2 - M_m))))))
+                         M_MgO * (2.0 * M_FeSiO3 - 2.0 * M_m) + M_MgSiO3 * (
+                         2.0 * M_FeO + 4.0 * M_MgO - 6.0 * M_m) + M_O * (M_MgO + M_MgSiO3)) + M_MgO * (
+                                                                                              -2.0 * M_FeO * M_m + M_FeSiO3 * (
+                                                                                              4.0 * M_FeO - 2.0 * M_m)) + M_MgSiO3 * (
+                                                                                              M_FeO * (
+                                                                                              4.0 * M_MgO - 6.0 * M_m) + M_FeSiO3 * (
+                                                                                              4.0 * M_FeO + 4.0 * M_MgO - 6.0 * M_m)) + M_O * (
+                                                                                              M_MgO * (
+                                                                                              M_FeO + M_FeSiO3) + M_MgSiO3 * (
+                                                                                              M_FeO + M_FeSiO3)))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                         M_O * M_m * (M_Fe * M_MgO * (4.0 * M_FeO + 4.0 * M_FeSiO3) + M_Mg * (
+                         M_Fe * (4.0 * M_FeO + 4.0 * M_MgO) + M_MgO * (4.0 * M_FeO + 4.0 * M_FeSiO3))) + M_Si * (
+                         M_Mg * (M_Fe * (
+                         M_O * (-3.0 * M_FeO - 3.0 * M_MgO + 15.0 * M_m) + M_m * (M_FeO + M_MgO)) + M_MgO * M_m * (
+                                 M_FeO + M_FeSiO3) + M_O * (M_FeO * (-3.0 * M_MgO + 15.0 * M_m) + M_FeSiO3 * (
+                         -9.0 * M_FeO - 3.0 * M_MgO + 15.0 * M_m))) + M_MgO * (M_Fe * (
+                         M_O * (-3.0 * M_FeO + 6.0 * M_FeSiO3 + 9.0 * M_m) + M_m * (M_FeO + M_FeSiO3)) + M_O * M_m * (
+                                                                               9.0 * M_FeO + 9.0 * M_FeSiO3))) + M_c * (
+                         M_Mg * (M_Fe * (M_O * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_MgO * M_m * (
+                         -M_FeO - M_FeSiO3) + M_O * (
+                                 M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_FeO + M_MgO - M_m))) + M_MgO * (
+                         M_Fe * (M_O * (M_FeO - M_m) + M_m * (-M_FeO - M_FeSiO3)) + M_O * M_m * (
+                         -M_FeO - M_FeSiO3)) + M_Si * (M_Mg * (
+                         M_Fe * (2.0 * M_FeO + 2.0 * M_MgO + M_O - 6.0 * M_m) + M_FeO * (
+                         2.0 * M_MgO - 6.0 * M_m) + M_FeSiO3 * (4.0 * M_FeO + 2.0 * M_MgO - 6.0 * M_m) + M_O * (
+                         M_FeO + M_FeSiO3)) + M_MgO * (M_Fe * (2.0 * M_FeO - 2.0 * M_FeSiO3 - 4.0 * M_m) + M_m * (
+                         -4.0 * M_FeO - 4.0 * M_FeSiO3))))) + M_Si * (M_Fe * (M_MgO * (
+        M_FeO * M_m * (-1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_FeSiO3 * (
+        M_FeO * (-1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+        1.0 * dM_FeO_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er))) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+        -1.0 * dM_FeSiO3_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                 -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                 1.0 * dM_FeO_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er))) + M_O * (
+                                                                              M_MgO * (M_FeO * (
+                                                                              2 * dM_FeO_er + 5.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                       -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 16.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+                                                                                       -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                              M_FeO * (
+                                                                              2 * dM_FeO_er + 5.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                              -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_MgO * (
+                                                                              -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_m * (
+                                                                              -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er - 9.0 * dM_SiO2_er)))) + M_Mg * (
+                                                                      M_Fe * (M_FeSiO3 * (M_FeO * (
+                                                                      -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                          -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                          1.0 * dM_FeO_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                              M_FeO * (
+                                                                              -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                              -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                              1.0 * dM_FeO_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er)) + M_O * (
+                                                                              M_FeO * (
+                                                                              2 * dM_FeO_er + 5.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                              -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_MgO * (
+                                                                              2 * dM_FeO_er + 5.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                              -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+                                                                              -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_m * (
+                                                                              M_FeO * (
+                                                                              -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_MgO * (
+                                                                              -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er))) + M_MgO * (
+                                                                      M_FeO * M_m * (
+                                                                      -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                      M_FeO * (
+                                                                      -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                      1.0 * dM_FeO_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                                                      M_FeO * (M_MgO * (
+                                                                      -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                               -1.0 * dM_FeSiO3_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                      M_FeO * (
+                                                                      -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                      -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                      1.0 * dM_FeO_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er))) + M_O * (
+                                                                      M_FeO * (M_MgO * (
+                                                                      2 * dM_FeO_er + 5.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                                                                               -9.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                      M_FeO * (
+                                                                      -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er) + M_MgO * (
+                                                                      -1.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                                                                      9.0 * dM_FeO_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                      M_FeO * (
+                                                                      -10.0 * dM_FeO_er - 16.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                      -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)))) + M_O * (
+                                                                      M_MgO * (M_FeO * M_m * (
+                                                                      -9.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                               M_FeO * (
+                                                                               -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_m * (
+                                                                               9.0 * dM_FeO_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                                                      M_FeO * (M_MgO * (
+                                                                      -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_m * (
+                                                                               -9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er - 9.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                      M_FeO * (
+                                                                      -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                      -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_m * (
+                                                                      9.0 * dM_FeO_er + 9.0 * dM_MgO_er - 9.0 * dM_SiO2_er)))) + dKSiO2_KSiO2 * (
+                                                                      M_O * (M_Fe * (M_MgO * (
+                                                                      -4.0 * M_FeO * M_m + M_FeSiO3 * (
+                                                                      6.0 * M_FeO - 10.0 * M_m)) + M_MgSiO3 * (M_FeO * (
+                                                                      6.0 * M_MgO - 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                               6.0 * M_FeO + 6.0 * M_MgO - 10.0 * M_m))) + M_Mg * (
+                                                                             M_Fe * (M_FeSiO3 * (
+                                                                             6.0 * M_FeO + 6.0 * M_MgO - 10.0 * M_m) + M_MgSiO3 * (
+                                                                                     6.0 * M_FeO + 6.0 * M_MgO - 10.0 * M_m) + M_m * (
+                                                                                     -4.0 * M_FeO - 4.0 * M_MgO)) + M_MgO * (
+                                                                             -4.0 * M_FeO * M_m + M_FeSiO3 * (
+                                                                             6.0 * M_FeO - 4.0 * M_m)) + M_MgSiO3 * (
+                                                                             M_FeO * (
+                                                                             6.0 * M_MgO - 10.0 * M_m) + M_FeSiO3 * (
+                                                                             6.0 * M_FeO + 6.0 * M_MgO - 10.0 * M_m)))) + M_c * (
+                                                                      M_Fe * (M_MgO * (M_FeO * M_m + M_FeSiO3 * (
+                                                                      -2.0 * M_FeO + 3.0 * M_m)) + M_MgSiO3 * (M_FeO * (
+                                                                      -2.0 * M_MgO + M_m) + M_FeSiO3 * (
+                                                                                                               -2.0 * M_FeO - 2.0 * M_MgO + 3.0 * M_m)) + M_O * (
+                                                                              M_MgO * (-M_FeO + M_m) + M_MgSiO3 * (
+                                                                              -M_FeO + M_m))) + M_Mg * (M_Fe * (
+                                                                      M_FeSiO3 * (
+                                                                      -2.0 * M_FeO - 2.0 * M_MgO + 3.0 * M_m) + M_MgSiO3 * (
+                                                                      -2.0 * M_FeO - 2.0 * M_MgO + 3.0 * M_m) + M_O * (
+                                                                      -M_FeO - M_MgO + M_m) + M_m * (
+                                                                      M_FeO + M_MgO)) + M_MgO * (
+                                                                                                        M_FeO * M_m + M_FeSiO3 * (
+                                                                                                        -2.0 * M_FeO + M_m)) + M_MgSiO3 * (
+                                                                                                        M_FeO * (
+                                                                                                        -2.0 * M_MgO + 3.0 * M_m) + M_FeSiO3 * (
+                                                                                                        -2.0 * M_FeO - 2.0 * M_MgO + 3.0 * M_m)) + M_O * (
+                                                                                                        M_FeO * (
+                                                                                                        -M_MgO + M_m) + M_FeSiO3 * (
+                                                                                                        -M_MgO + M_m))) + M_O * M_m * (
+                                                                      M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
+                                                                      M_FeO + M_FeSiO3))))) + M_c * (M_Fe * (M_MgO * (
+        M_FeO * M_m * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+        M_FeO * (dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+        -dM_FeO_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er))) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+        dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                              dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                                                              -dM_FeO_er - dM_MgO_er + 1.0 * dM_SiO2_er))) + M_O * (
+                                                                                                             M_MgO * (
+                                                                                                             M_FeO * (
+                                                                                                             -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                             dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er) + M_MgO * (
+                                                                                                             dM_MgO_er + dM_MgSiO3_er) + M_m * (
+                                                                                                             dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)))) + M_Mg * (
+                                                                                                     M_Fe * (
+                                                                                                     M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                     -dM_FeO_er - dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                     -dM_FeO_er - dM_MgO_er + 1.0 * dM_SiO2_er)) + M_O * (
+                                                                                                     M_FeO * (
+                                                                                                     -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                                                                                                     -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                     dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_m * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_MgO * (
+                                                                                                     dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er))) + M_MgO * (
+                                                                                                     M_FeO * M_m * (
+                                                                                                     dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                     -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er))) + M_MgSiO3 * (
+                                                                                                     M_FeO * (M_MgO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                              1.0 * dM_FeSiO3_er - dM_MgO_er + 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                     dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                     -dM_FeO_er - dM_MgO_er + 1.0 * dM_SiO2_er))) + M_O * (
+                                                                                                     M_FeO * (M_MgO * (
+                                                                                                     -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                              dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er) + M_MgO * (
+                                                                                                     dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                     -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er)))) + M_O * (
+                                                                                                     M_MgO * (
+                                                                                                     M_FeO * M_m * (
+                                                                                                     dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_m * (
+                                                                                                     -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er))) + M_MgSiO3 * (
+                                                                                                     M_FeO * (M_MgO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_m * (
+                                                                                                              dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_MgO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_m * (
+                                                                                                     -dM_FeO_er - dM_MgO_er + dM_SiO2_er)))) + M_Si * (
+                                                                                                     M_Fe * (M_MgO * (
+                                                                                                     M_FeO * (
+                                                                                                     -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                     dM_FeO_er + 3.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                     2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             -dM_FeO_er - 3.0 * dM_FeSiO3_er + 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                             dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                             4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                             2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_O * (
+                                                                                                             M_MgO * (
+                                                                                                             dM_MgO_er + dM_MgSiO3_er) + M_MgSiO3 * (
+                                                                                                             dM_MgO_er + dM_MgSiO3_er))) + M_Mg * (
+                                                                                                     M_Fe * (M_FeO * (
+                                                                                                     -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                             dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                             -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                                                             dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                             2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_FeO * (
+                                                                                                     M_MgO * (
+                                                                                                     -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                     4.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_MgO * (
+                                                                                                     1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                     -4.0 * dM_FeO_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     3.0 * dM_FeO_er + 5.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                     dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_O * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er) + M_FeSiO3 * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er))) + M_MgO * (
+                                                                                                     M_FeO * M_m * (
+                                                                                                     4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                     -4.0 * dM_FeO_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                                                                                     M_FeO * (M_MgO * (
+                                                                                                     4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                              4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                     4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                     -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er))) + M_O * (
+                                                                                                     M_MgO * (M_FeO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                                                              dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                                                     dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er)))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
 
-    def dM_Fe_dTc(self, Moles, dKs):
+    def dM_FeSiO3_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
         M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
         dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_Fe * (M_FeSiO3 * dKFeSiO3_KFeSiO3 * (M_Mg * M_O * (4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))) + M_Si * (M_Mg * (
-        M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_MgSiO3 * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-3 * M_FeO - M_MgO + 9 * M_m) + M_m * (
-        -6 * M_FeO + 4 * M_MgO))) + M_O * (M_MgO * (-6 * M_FeO * M_m + M_SiO2 * (-3 * M_FeO + 9 * M_m)) + M_MgSiO3 * (
-        M_SiO2 * (-3 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (-6 * M_FeO + 9 * M_MgO)))) + M_c * (M_Mg * (
-        -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_O * (M_MgO * M_SiO2 * (
-        M_FeO - M_m) + M_MgSiO3 * (-M_MgO * M_m + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_Si * (M_Mg * (
-        M_MgSiO3 * (4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-        2 * M_FeO + M_MgO - 4 * M_m) + M_m * (2 * M_FeO - M_MgO)) + M_MgO * (2 * M_FeO * M_m + M_SiO2 * (
-        2 * M_FeO - 4 * M_m)) + M_MgSiO3 * (M_SiO2 * (2 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-        2 * M_FeO - 4 * M_MgO)) + M_O * (M_MgO * (M_SiO2 - M_m) + M_MgSiO3 * (M_SiO2 - M_m))))) + M_Mg * dKMgO_KMgO * (
-                       M_O * (M_MgO * (-4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                       -4 * M_FeO * M_m + M_SiO2 * (4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                              M_FeO * (-4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                              M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO)))) + M_Si * (
-                       M_MgO * (
-                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                       M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-                       M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (M_MgO * (
-                       M_FeO * (M_SiO2 - 4 * M_m) + M_FeSiO3 * (9 * M_FeO - 2 * M_SiO2 - 10 * M_m)) + M_MgSiO3 * (
-                                                                                          M_FeO * (
-                                                                                          9 * M_MgO - 2 * M_SiO2 - 10 * M_m) + M_FeSiO3 * (
-                                                                                          9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m)))) + M_c * (
-                       M_MgO * (
-                       M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-                       M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-                       M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (
-                       M_FeO * M_MgO * (-M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
-                       -M_FeO * M_MgO + M_FeSiO3 * (-M_FeO - M_MgO + M_m))) + M_Si * (
-                       M_MgO * (M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (-4 * M_FeO + M_SiO2 + 3 * M_m)) + M_MgSiO3 * (
-                       M_FeO * (-4 * M_MgO + M_SiO2 + 3 * M_m) + M_FeSiO3 * (
-                       -4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m)) + M_O * (M_MgO * (-M_FeO - M_FeSiO3) + M_MgSiO3 * (
-                       -M_FeO - M_FeSiO3))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_Mg * M_O * (
-        -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO))) + M_Si * (M_Mg * (
-        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_FeO * (-2 * M_SiO2 - 10 * M_m) + M_FeSiO3 * (
-        9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m))) + M_MgO * M_O * (M_FeO * (-3 * M_SiO2 - 6 * M_m) + M_FeSiO3 * (
-        6 * M_SiO2 - 15 * M_m))) + M_c * (M_Mg * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        M_O * (-M_FeO - M_MgO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_MgO * M_O * (
-                                          M_FeO * M_SiO2 + M_FeSiO3 * M_m) + M_Si * (M_Mg * (
-        M_FeO * (M_SiO2 + 3 * M_m) + M_FeSiO3 * (-4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (
-        -M_FeO - M_FeSiO3)) + M_MgO * (M_FeO * (2 * M_SiO2 + 2 * M_m) + M_FeSiO3 * (
-        -2 * M_SiO2 + 6 * M_m))))) + M_Si * dKSiO2_KSiO2 * (M_O * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (4 * M_SiO2 - 10 * M_m) - 6 * M_SiO2 * M_m) + M_FeSiO3 * (
-        M_SiO2 * (6 * M_FeO + 2 * M_MgO - 6 * M_m) + M_m * (-6 * M_FeO + 4 * M_MgO))) + M_MgO * (
-                                                                   -6 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                   -6 * M_FeO * M_m + M_SiO2 * (
-                                                                   6 * M_FeO - 6 * M_m))) + M_MgSiO3 * (M_FeO * (
-        -6 * M_MgO * M_m + M_SiO2 * (6 * M_MgO - 6 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        6 * M_FeO + 6 * M_MgO - 6 * M_m) + M_m * (-6 * M_FeO - 6 * M_MgO)))) + M_c * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (-M_SiO2 + 3 * M_m) + 2 * M_SiO2 * M_m) + M_FeSiO3 * (
-        M_SiO2 * (-2 * M_FeO - M_MgO + 2 * M_m) + M_m * (2 * M_FeO - M_MgO)) + M_O * (
-        M_FeO * (-M_MgSiO3 - M_SiO2) + M_FeSiO3 * (M_MgO - M_m))) + M_MgO * (2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        2 * M_FeO * M_m + M_SiO2 * (-2 * M_FeO + 2 * M_m))) + M_MgSiO3 * (M_FeO * (
-        2 * M_MgO * M_m + M_SiO2 * (-2 * M_MgO + 2 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO))) + M_O * (M_MgO * (
-        -M_FeO * M_SiO2 - M_FeSiO3 * M_m) + M_MgSiO3 * (-M_FeO * M_SiO2 - M_FeSiO3 * M_m)))) + dKFeO_KFeO * (
-                       M_Mg * M_O * (M_MgO * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                       4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                     M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                     M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                     4 * M_FeO + 4 * M_MgO)))) + M_Si * (M_Mg * (M_MgO * (
-                       M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                 M_FeO * (M_MgO * M_m + M_SiO2 * (
-                                                                                 -M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                                                                 -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                              M_FeO + M_MgO))) + M_O * (
-                                                                                 M_FeO * (4 * M_MgO * M_m + M_SiO2 * (
-                                                                                 -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                 9 * M_FeO * M_m + M_MgO * (
-                                                                                 -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                 -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                 M_FeO * (
-                                                                                 -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                 -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
-                                                                         M_MgO * (
-                                                                         9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                         9 * M_FeO * M_m + M_SiO2 * (
-                                                                         -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (M_FeO * (
-                                                                         9 * M_MgO * M_m + M_SiO2 * (
-                                                                         -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                                                         -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                                              9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                       M_Mg * (M_MgO * (
-                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                               M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-                               M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-                               M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
-                               M_FeO * (M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                               M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_FeO + M_MgO - M_m)))) + M_O * (M_MgO * (
-                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                    M_FeO * (
-                                                                                                    -M_MgO * M_m + M_SiO2 * (
-                                                                                                    M_MgO - M_m)) + M_FeSiO3 * (
+        return M_FeSiO3 * (M_Fe * (M_O * (M_MgO * (M_FeO * (M_SiO2 * (
+        4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                            -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                   -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (
+        M_SiO2 * (4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+        4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (-4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                         -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er))) + dKFeO_KFeO * (
+                                   M_Mg * M_O * (-4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                   M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                   4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Si * (M_Mg * (
+                                   -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                   M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                   M_FeO * (3.0 * M_SiO2 + 6.0 * M_m) + M_MgO * (M_SiO2 - 4.0 * M_m) + M_MgSiO3 * (
+                                   9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m) - 9.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                              M_MgO * (M_FeO * (
+                                                                                              3.0 * M_SiO2 + 6.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                              M_FeO * (
+                                                                                              3.0 * M_SiO2 + 6.0 * M_m) + M_MgO * (
+                                                                                              9.0 * M_SiO2 - 9.0 * M_m) - 9.0 * M_SiO2 * M_m))) + M_c * (
+                                   M_Mg * (M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                   M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                           M_MgSiO3 * (-M_FeO - M_MgO + M_m) + M_SiO2 * (
+                                           -M_FeO - M_MgO + M_m))) + M_O * (
+                                   M_MgO * M_SiO2 * (-M_FeO + M_m) + M_MgSiO3 * (
+                                   M_MgO * (-M_SiO2 + M_m) + M_SiO2 * (-M_FeO + M_m))) + M_Si * (M_Mg * (
+                                   M_FeO * (-2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (-M_SiO2 + M_m) + M_MgSiO3 * (
+                                   -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_O * (
+                                   -M_MgO - M_MgSiO3 - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_MgO * (M_FeO * (
+                                   -2.0 * M_SiO2 - 2.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+                                   -2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (
+                                                                                                  -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                 M_MgO * (
+                                                                                                 -M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                                                 -M_SiO2 + M_m)))))) + M_Mg * (
+                           M_O * (M_Fe * (M_FeO * (M_SiO2 * (
+                           4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                   -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_MgO * (
+                                          M_SiO2 * (
+                                          4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                          -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                          -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgO * (
+                                  M_FeO * (M_SiO2 * (
+                                  4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                           -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                  -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (M_SiO2 * (
+                           4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                 -4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                        M_SiO2 * (
+                                                                                        4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                        -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                        -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er))) + dKMgO_KMgO * (
+                           M_Fe * M_O * (4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                           M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Si * (M_Fe * (
+                           M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                           M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                           M_MgO * (2.0 * M_SiO2 + 10.0 * M_m) + M_MgSiO3 * (
+                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m))) + M_FeO * M_O * (M_MgO * (
+                           3.0 * M_SiO2 + 6.0 * M_m) + M_MgSiO3 * (-6.0 * M_SiO2 + 15.0 * M_m))) + M_c * (M_Fe * (
+                           -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) + M_O * (
+                           M_FeO + M_MgO - M_m) - M_SiO2 * M_m)) + M_FeO * M_O * (
+                                                                                                          -M_MgO * M_SiO2 - M_MgSiO3 * M_m) + M_Si * (
+                                                                                                          M_Fe * (
+                                                                                                          M_MgO * (
+                                                                                                          -M_SiO2 - 3.0 * M_m) + M_MgSiO3 * (
+                                                                                                          4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                          M_MgO + M_MgSiO3)) + M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          -2.0 * M_SiO2 - 2.0 * M_m) + M_MgSiO3 * (
+                                                                                                          2.0 * M_SiO2 - 6.0 * M_m)))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                           M_O * (M_Fe * M_FeO * M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_Mg * (M_Fe * (
+                           M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeO * M_MgO * (
+                                                                                               -4.0 * M_SiO2 + 4.0 * M_m))) + M_Si * (
+                           M_Mg * (M_Fe * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_O * (
+                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_SiO2 * M_m) + M_FeO * (
+                                   M_MgO * (-M_SiO2 + M_m) + M_O * (
+                                   -9.0 * M_MgO - 6.0 * M_SiO2 + 15.0 * M_m))) + M_MgO * (M_Fe * (
+                           M_FeO * (-M_SiO2 + M_m) + M_O * (-9.0 * M_FeO - 6.0 * M_SiO2 + 15.0 * M_m)) + M_FeO * M_O * (
+                                                                                          -9.0 * M_SiO2 + 9.0 * M_m))) + M_c * (
+                           M_Mg * (M_Fe * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) + M_O * (
+                           M_FeO + M_MgO - M_m) - M_SiO2 * M_m) + M_FeO * (
+                                   M_MgO * (M_SiO2 - M_m) + M_O * (M_MgO - M_m))) + M_MgO * (
+                           M_Fe * (M_FeO * (M_SiO2 - M_m) + M_O * (M_FeO - M_m)) + M_FeO * M_O * (
+                           M_SiO2 - M_m)) + M_Si * (M_Mg * (
+                           M_Fe * (4.0 * M_FeO + 4.0 * M_MgO + M_O + M_SiO2 - 9.0 * M_m) + M_FeO * (
+                           4.0 * M_MgO + 2.0 * M_SiO2 - 6.0 * M_m)) + M_MgO * (
+                                                    M_Fe * (4.0 * M_FeO + 2.0 * M_SiO2 - 6.0 * M_m) + M_FeO * (
+                                                    4.0 * M_SiO2 - 4.0 * M_m))))) + M_Si * (M_Fe * (M_MgO * (M_FeO * (
+        M_SiO2 * (dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+        -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                             -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                                    M_FeO * (M_SiO2 * (
+                                                                                                    dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                             -1.0 * dM_FeSiO3_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgO * (
                                                                                                     M_SiO2 * (
-                                                                                                    M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                    -M_FeO - M_MgO)))) + M_Si * (
-                       M_Mg * (M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                       -4 * M_FeO * M_m + M_MgO * (4 * M_FeO - M_m) + M_SiO2 * (
-                       4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (M_FeO * (4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                       4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
+                                                                                                    1.0 * dM_FeO_er + 1.0 * dM_FeSiO3_er) + M_m * (
+                                                                                                    -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                    -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_O * (
+                                                                                                    M_MgO * (M_FeO * (
+                                                                                                    6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                             4.0 * dM_FeO_er + 10.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 12.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_m * (
+                                                                                                             -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 15.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                    M_FeO * (
+                                                                                                    6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                    -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                    4.0 * dM_FeO_er + 10.0 * dM_FeSiO3_er + 6.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_m * (
+                                                                                                    -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er + 15.0 * dM_MgO_er - 15.0 * dM_SiO2_er)))) + M_Mg * (
+                                                                                            M_Fe * (M_FeO * (M_SiO2 * (
+                                                                                            dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                             -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                                    M_SiO2 * (
+                                                                                                    dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                    -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_O * (
+                                                                                                    M_FeO * (
+                                                                                                    6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                    6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                    4.0 * dM_FeO_er + 10.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 10.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_m * (
+                                                                                                    -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                    -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                            M_FeO * (M_SiO2 * (
+                                                                                            dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                     -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                            -dM_FeO_er - dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                            M_FeO * (M_SiO2 * (
+                                                                                            dM_FeO_er + 2.0 * dM_FeSiO3_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                     -1.0 * dM_FeSiO3_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                            M_SiO2 * (
+                                                                                            dM_FeO_er + dM_FeSiO3_er) + M_m * (
+                                                                                            -dM_FeO_er - dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                            -dM_FeO_er - dM_FeSiO3_er)) + M_O * (
+                                                                                            M_FeO * (M_MgO * (
+                                                                                            6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                     9.0 * dM_FeO_er + 18.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_m * (
+                                                                                                     -9.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                            M_SiO2 * (
+                                                                                            dM_FeO_er + dM_FeSiO3_er) + M_m * (
+                                                                                            -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                            M_FeO * (
+                                                                                            15.0 * dM_FeO_er + 24.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_MgO * (
+                                                                                            9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                                            4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                            -25.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                            -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er))) + M_O * (
+                                                                                            M_MgO * (M_FeO * (M_SiO2 * (
+                                                                                            9.0 * dM_FeO_er + 18.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 18.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_m * (
+                                                                                                              -9.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                     -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                            M_FeO * (M_SiO2 * (
+                                                                                            9.0 * dM_FeO_er + 18.0 * dM_FeSiO3_er + 9.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_m * (
+                                                                                                     -9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er - 9.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                            M_SiO2 * (
+                                                                                            9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er) + M_m * (
+                                                                                            -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                            -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er))) + dKSiO2_KSiO2 * (
+                                                                                            M_O * (M_Fe * (M_MgO * (
+                                                                                            M_FeO * (
+                                                                                            -2.0 * M_SiO2 - 4.0 * M_m) + 6.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -2.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                                           -6.0 * M_SiO2 + 6.0 * M_m) + 6.0 * M_SiO2 * M_m)) + M_Mg * (
+                                                                                                   M_Fe * (M_FeO * (
+                                                                                                   -2.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                                           -2.0 * M_SiO2 - 4.0 * M_m) + 6.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                                   M_MgO * (
+                                                                                                   -2.0 * M_SiO2 - 4.0 * M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_SiO2 - 10.0 * M_m)))) + M_c * (
+                                                                                            M_Fe * (M_MgO * (M_FeO * (
+                                                                                            M_SiO2 + M_m) - 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                    M_FeO * (
+                                                                                                    M_SiO2 + M_m) + M_MgO * (
+                                                                                                    2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                    M_MgO * (
+                                                                                                    -M_FeO + M_m) + M_MgSiO3 * (
+                                                                                                    -M_FeO + M_m))) + M_FeO * M_O * (
+                                                                                            M_MgO * (
+                                                                                            -M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                                            -M_SiO2 + M_m)) + M_Mg * (
+                                                                                            M_Fe * (M_FeO * (
+                                                                                            M_SiO2 + M_m) + M_MgO * (
+                                                                                                    M_SiO2 + M_m) + M_O * (
+                                                                                                    -M_FeO - M_MgO + M_m) - 2.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                            M_MgO * (
+                                                                                            M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                                            -M_SiO2 + 3.0 * M_m) + M_O * (
+                                                                                            -M_MgO - M_MgSiO3 - M_SiO2 + M_m)))))) + M_c * (
+                           M_Fe * (M_MgO * (M_FeO * (M_SiO2 * (
+                           -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                     dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                            dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                           M_SiO2 * (-dM_FeO_er - 2.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                           dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                           -dM_FeO_er - 1.0 * dM_FeSiO3_er) + M_m * (dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                           dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_O * (
+                                   M_MgO * (M_FeO * (-dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                   dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                   M_FeO * (-dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er) + M_MgO * (
+                                   dM_MgO_er + dM_MgSiO3_er) + M_m * (
+                                   dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)))) + M_Mg * (M_Fe * (M_FeO * (M_SiO2 * (
+                           -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgO * (
+                                                                                               M_SiO2 * (
+                                                                                               -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_O * (
+                                                                                               M_FeO * (
+                                                                                               -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                                                                                               -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                               dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                       M_FeO * (M_SiO2 * (
+                                                                                       -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                       M_FeO * (M_SiO2 * (
+                                                                                       -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                1.0 * dM_FeSiO3_er - dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                       M_SiO2 * (
+                                                                                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_O * (
+                                                                                       M_FeO * (M_MgO * (
+                                                                                       -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_SiO2 * (
+                                                                                                -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                                                                                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * (
+                                                                                       M_MgO * (
+                                                                                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)))) + M_O * (
+                           M_MgO * (M_FeO * (M_SiO2 * (
+                           -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                             dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                    dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                           M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                           dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                           -dM_FeO_er - dM_FeSiO3_er) + M_m * (dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                             dM_FeO_er + dM_FeSiO3_er))) + M_Si * (
+                           M_Fe * (M_MgO * (M_FeO * (
+                           -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                            -dM_FeO_er - 3.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                            3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 6.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                   M_FeO * (
+                                   -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_MgO * (
+                                   4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                   -dM_FeO_er - 3.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                   3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er + 6.0 * dM_SiO2_er)) + M_O * (
+                                   M_MgO * (dM_MgO_er + dM_MgSiO3_er) + M_MgSiO3 * (
+                                   dM_MgO_er + dM_MgSiO3_er))) + M_Mg * (M_Fe * (M_FeO * (
+                           -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_MgO * (
+                                                                                 -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                 -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                 3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_FeO * (
+                                                                         M_MgO * (
+                                                                         -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                         -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                         4.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_MgO * (
+                                                                         M_SiO2 * (-dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                         dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                         M_FeO * (
+                                                                         -6.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_MgO * (
+                                                                         -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                         -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                         9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er)) + M_O * (
+                                                                         M_MgO * (
+                                                                         -dM_FeO_er - dM_FeSiO3_er) + M_MgSiO3 * (
+                                                                         -dM_FeO_er - dM_FeSiO3_er) + M_SiO2 * (
+                                                                         -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                         dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                         4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_MgO * (
+                           M_FeO * (M_SiO2 * (
+                           -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                    4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                           4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (M_SiO2 * (
+                           -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                                         4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                M_SiO2 * (
+                                                                                -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_O * (
+                           M_MgO * (
+                           M_SiO2 * (-dM_FeO_er - dM_FeSiO3_er) + M_m * (dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (
+                           M_SiO2 * (-dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                           dM_FeO_er + dM_FeSiO3_er))))) + dKFeSiO3_KFeSiO3 * (M_O * (M_Fe * M_FeO * (
+        -4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Mg * (
+                                                                                      M_Fe * (M_MgSiO3 * (M_FeO * (
+                                                                                      4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                                          4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                              -4.0 * M_FeO - 4.0 * M_MgO)) + M_FeO * (
+                                                                                      -4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                                      M_MgO * (
+                                                                                      4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)))) + M_Si * (
+                                                                               M_Fe * (M_FeO * (
+                                                                               -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                               M_MgO * (
+                                                                               M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                       M_MgO * (M_FeO * (
+                                                                                       M_SiO2 - 4.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       9.0 * M_MgO + M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                       9.0 * M_SiO2 - 9.0 * M_m) - 9.0 * M_SiO2 * M_m))) + M_FeO * M_O * (
+                                                                               -9.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                               M_MgO * (
+                                                                               9.0 * M_SiO2 - 9.0 * M_m) - 9.0 * M_SiO2 * M_m)) + M_Mg * (
+                                                                               M_Fe * (M_MgSiO3 * (
+                                                                               M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                                               M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                                                                       M_FeO * (
+                                                                                       M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                       M_SiO2 - 4.0 * M_m) + M_MgSiO3 * (
+                                                                                       9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                       -M_FeO - M_MgO)) + M_FeO * (
+                                                                               -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                               M_MgO * (
+                                                                               M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                                                               M_MgO * (
+                                                                               M_SiO2 - 4.0 * M_m) + M_MgSiO3 * (
+                                                                               9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m) - 9.0 * M_SiO2 * M_m)))) + M_c * (
+                                                                               M_Fe * (M_FeO * (
+                                                                               M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                               M_MgO * (
+                                                                               -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                       M_MgO * M_SiO2 * (
+                                                                                       -M_FeO + M_m) + M_MgSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       -M_MgO - M_SiO2) + M_MgO * (
+                                                                                       -M_SiO2 + M_m) + M_SiO2 * M_m))) + M_FeO * M_O * (
+                                                                               M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                               M_MgO * (
+                                                                               -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_Mg * (
+                                                                               M_Fe * (M_MgSiO3 * (
+                                                                               M_FeO * (-M_SiO2 + M_m) + M_MgO * (
+                                                                               -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                                                       M_MgSiO3 * (
+                                                                                       -M_FeO - M_MgO + M_m) + M_SiO2 * (
+                                                                                       -M_FeO - M_MgO + M_m)) + M_SiO2 * M_m * (
+                                                                                       M_FeO + M_MgO)) + M_FeO * (
+                                                                               M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                               M_MgO * (
+                                                                               -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                                               M_MgSiO3 * (-M_MgO + M_m) + M_SiO2 * (
+                                                                               -M_MgO + M_m)))) + M_Si * (M_Fe * (
+                                                                               M_MgO * (M_FeO * (
+                                                                               -M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                               M_FeO * (
+                                                                               -4.0 * M_MgO - M_SiO2 + M_m) + M_MgO * (
+                                                                               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                               M_MgO * (
+                                                                               -M_FeO - M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                               -M_FeO - M_SiO2 + M_m))) + M_FeO * (
+                                                                                                          4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                                                          M_MgO * (
+                                                                                                          -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                          M_MgO * (
+                                                                                                          -M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                                                          -M_SiO2 + M_m))) + M_Mg * (
+                                                                                                          M_Fe * (
+                                                                                                          M_FeO * (
+                                                                                                          -M_SiO2 + M_m) + M_MgO * (
+                                                                                                          -M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                                                          -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_O * (
+                                                                                                          -M_FeO - M_MgO - M_MgSiO3 - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          -M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                                                          -4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_O * (
+                                                                                                          -M_MgO - M_MgSiO3 - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m)))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
+
+    def dM_FeO_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
+        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
+        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
+        return M_FeO * (M_Fe * (M_O * (M_MgO * (M_FeSiO3 * (
+        M_SiO2 * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeO_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeSiO3 * (
+        M_SiO2 * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+        4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (-4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                      -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er))) + dKFeO_KFeO * (
+                                M_Mg * M_O * (
+                                M_MgO * (M_FeSiO3 * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Si * (M_Mg * (
+                                M_MgO * (M_FeSiO3 * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+                                M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                M_FeSiO3 * (9.0 * M_MgO + 6.0 * M_SiO2 - 15.0 * M_m) + M_MgO * (
+                                M_SiO2 - 4.0 * M_m) + M_MgSiO3 * (
+                                9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m) - 9.0 * M_SiO2 * M_m)) + M_O * (M_MgO * (
+                                M_FeSiO3 * (6.0 * M_SiO2 - 15.0 * M_m) - 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeSiO3 * (
+                                6.0 * M_SiO2 - 15.0 * M_m) + M_MgO * (
+                                                                                                           9.0 * M_SiO2 - 9.0 * M_m) - 9.0 * M_SiO2 * M_m))) + M_c * (
+                                M_Mg * (M_MgO * (M_FeSiO3 * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+                                M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                        M_FeSiO3 * (-M_MgO + M_m) + M_MgSiO3 * (-M_MgO + M_m) + M_SiO2 * (
+                                        -M_MgO + M_m))) + M_O * (M_MgO * M_m * (M_FeSiO3 + M_SiO2) + M_MgSiO3 * (
+                                M_MgO * (-M_SiO2 + M_m) + M_m * (M_FeSiO3 + M_SiO2))) + M_Si * (M_Mg * (
+                                M_FeSiO3 * (-4.0 * M_MgO - 2.0 * M_SiO2 + 6.0 * M_m) + M_MgO * (
+                                -M_SiO2 + M_m) + M_MgSiO3 * (-4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_O * (
+                                -M_MgO - M_MgSiO3 - M_SiO2 + M_m) + 4.0 * M_SiO2 * M_m) + M_MgO * (M_FeSiO3 * (
+                                -2.0 * M_SiO2 + 6.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeSiO3 * (
+                                -2.0 * M_SiO2 + 6.0 * M_m) + M_MgO * (
+                                                                                               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                M_MgO * (
+                                                                                                -M_SiO2 + M_m) + M_MgSiO3 * (
+                                                                                                -M_SiO2 + M_m)))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                        M_O * (M_Fe * (4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                        M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Mg * (
+                               M_MgSiO3 * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                               4.0 * M_Fe + 4.0 * M_MgO))) + M_Si * (M_Fe * (
+                        M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                        M_MgO * (2.0 * M_SiO2 + 10.0 * M_m) + M_MgSiO3 * (
+                        -9.0 * M_MgO + 2.0 * M_SiO2 + 10.0 * M_m))) + M_Mg * (M_Fe * (
+                        M_O * (2.0 * M_SiO2 + 10.0 * M_m) + M_SiO2 * M_m) + M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * (
+                        -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (M_MgO * (-M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                        -9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_O * (
+                                                                     9.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * (
+                                                                     -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_c * (
+                        M_Fe * (
+                        -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * (M_O + M_SiO2 - M_m) - M_SiO2 * M_m)) + M_Mg * (
+                        M_MgSiO3 * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                        M_MgSiO3 * (M_MgO - M_m) + M_SiO2 * (M_MgO - M_m)) + M_SiO2 * M_m * (-M_Fe - M_MgO)) + M_O * (
+                        -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_Si * (M_Fe * (
+                        M_MgO * (-M_SiO2 - 3.0 * M_m) + M_MgSiO3 * (4.0 * M_MgO - M_SiO2 - 3.0 * M_m) + M_O * (
+                        M_MgO + M_MgSiO3)) + M_Mg * (M_Fe * (M_O - M_SiO2 - 3.0 * M_m) + M_MgO * (
+                        M_SiO2 - M_m) + M_MgSiO3 * (4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                     M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) - 4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                                                                              M_MgO * (
+                                                                                                              4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                              M_MgO * (
+                                                                                                              M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                              M_SiO2 - M_m))))) + M_Mg * (
+                        M_O * (M_Fe * (M_FeSiO3 * (
+                        M_SiO2 * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                        -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                       M_SiO2 * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                       -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                       -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgO * (
+                               M_FeSiO3 * (M_SiO2 * (
+                               -4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                           -4.0 * dM_FeO_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                               -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeSiO3 * (
+                        M_SiO2 * (-4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                        -4.0 * dM_FeO_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                        4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                           -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                     -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er))) + dKMgO_KMgO * (
+                        M_Fe * M_O * (
+                        M_MgO * (M_FeSiO3 * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                        M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Si * (M_Fe * (
+                        M_MgO * (M_FeSiO3 * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+                        M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                        M_MgO * (-9.0 * M_FeSiO3 - M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                        -9.0 * M_MgO + 2.0 * M_SiO2 + 10.0 * M_m))) + M_FeSiO3 * M_O * (M_MgO * (
+                        -3.0 * M_SiO2 - 6.0 * M_m) + M_MgSiO3 * (6.0 * M_SiO2 - 15.0 * M_m))) + M_c * (M_Fe * (M_MgO * (
+                        M_FeSiO3 * (M_SiO2 - M_m) + M_O * (M_FeSiO3 + M_MgSiO3 + M_SiO2) - M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                               M_MgO * (
+                                                                                                               M_SiO2 - M_m) - M_SiO2 * M_m)) + M_FeSiO3 * M_O * (
+                                                                                                       M_MgO * M_SiO2 + M_MgSiO3 * M_m) + M_Si * (
+                                                                                                       M_Fe * (M_MgO * (
+                                                                                                       4.0 * M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                               4.0 * M_MgO - M_SiO2 - 3.0 * M_m) + M_O * (
+                                                                                                               M_MgO + M_MgSiO3)) + M_FeSiO3 * (
+                                                                                                       M_MgO * (
+                                                                                                       2.0 * M_SiO2 + 2.0 * M_m) + M_MgSiO3 * (
+                                                                                                       -2.0 * M_SiO2 + 6.0 * M_m)))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                        M_O * (M_Fe * M_FeSiO3 * M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) + M_Mg * (
+                        4.0 * M_Fe * M_SiO2 * M_m + M_FeSiO3 * M_MgO * (4.0 * M_SiO2 - 4.0 * M_m))) + M_Si * (M_Mg * (
+                        M_Fe * (M_O * (2.0 * M_SiO2 + 10.0 * M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                        M_MgO * (M_SiO2 - M_m) + M_O * (9.0 * M_MgO + 6.0 * M_SiO2 - 15.0 * M_m))) + M_MgO * (M_Fe * (
+                        M_FeSiO3 * (M_SiO2 - M_m) + M_O * (
+                        9.0 * M_FeSiO3 + 3.0 * M_SiO2 + 6.0 * M_m)) + M_FeSiO3 * M_O * (
+                                                                                                              9.0 * M_SiO2 - 9.0 * M_m))) + M_c * (
+                        M_Mg * (
+                        -M_Fe * M_SiO2 * M_m + M_FeSiO3 * (M_MgO * (-M_SiO2 + M_m) + M_O * (-M_MgO + M_m))) + M_MgO * (
+                        M_Fe * (M_FeSiO3 * (-M_SiO2 + M_m) + M_O * (-M_FeSiO3 - M_SiO2)) + M_FeSiO3 * M_O * (
+                        -M_SiO2 + M_m)) + M_Si * (M_Mg * (M_Fe * (M_O - M_SiO2 - 3.0 * M_m) + M_FeSiO3 * (
+                        -4.0 * M_MgO - 2.0 * M_SiO2 + 6.0 * M_m)) + M_MgO * (
+                                                  M_Fe * (-4.0 * M_FeSiO3 - 2.0 * M_SiO2 - 2.0 * M_m) + M_FeSiO3 * (
+                                                  -4.0 * M_SiO2 + 4.0 * M_m))))) + M_Si * (M_Fe * (M_MgO * (M_FeSiO3 * (
+        M_SiO2 * (-1.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+        -1.0 * dM_FeO_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                            -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                                   M_FeSiO3 * (
+                                                                                                   M_SiO2 * (
+                                                                                                   -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                   -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                                   M_SiO2 * (
+                                                                                                   1.0 * dM_FeO_er + 1.0 * dM_FeSiO3_er) + M_m * (
+                                                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_O * (
+                                                                                                   M_MgO * (M_FeSiO3 * (
+                                                                                                   -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 15.0 * dM_MgO_er - 24.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                            -2 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                            -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 6.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                   M_FeSiO3 * (
+                                                                                                   -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                   -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                   -2 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 3.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                   -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er - 6.0 * dM_SiO2_er)))) + M_Mg * (
+                                                                                           M_Fe * (M_FeSiO3 * (
+                                                                                           M_SiO2 * (
+                                                                                           -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                           -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                   M_SiO2 * (
+                                                                                                   -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                   -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_O * (
+                                                                                                   M_FeSiO3 * (
+                                                                                                   -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                                                   -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                   -2 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                   -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                           M_FeSiO3 * (M_SiO2 * (
+                                                                                           -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                       -1.0 * dM_FeO_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                           -dM_FeO_er - dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                           M_FeSiO3 * (M_SiO2 * (
+                                                                                           -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                       -1.0 * dM_FeO_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                           M_SiO2 * (
+                                                                                           dM_FeO_er + dM_FeSiO3_er) + M_m * (
+                                                                                           -dM_FeO_er - dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                           -dM_FeO_er - dM_FeSiO3_er)) + M_O * (
+                                                                                           M_FeSiO3 * (M_MgO * (
+                                                                                           3.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                       -9.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_m * (
+                                                                                                       -9.0 * dM_FeO_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                           M_SiO2 * (
+                                                                                           dM_FeO_er + dM_FeSiO3_er) + M_m * (
+                                                                                           -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                           M_FeSiO3 * (
+                                                                                           -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_MgO * (
+                                                                                           9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                                           4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                           -25.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                           -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er))) + M_O * (
+                                                                                           M_MgO * (M_FeSiO3 * (
+                                                                                           M_SiO2 * (
+                                                                                           -9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 18.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_m * (
+                                                                                           -9.0 * dM_FeO_er + 9.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                    -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                           M_FeSiO3 * (M_SiO2 * (
+                                                                                           -9.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_m * (
+                                                                                                       -9.0 * dM_FeO_er - 9.0 * dM_MgO_er + 9.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                           M_SiO2 * (
+                                                                                           9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er) + M_m * (
+                                                                                           -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                           -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er))) + dKSiO2_KSiO2 * (
+                                                                                           M_O * (M_Fe * (M_MgO * (
+                                                                                           M_FeSiO3 * (
+                                                                                           -4.0 * M_SiO2 + 10.0 * M_m) + 6.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                          M_FeSiO3 * (
+                                                                                                          -4.0 * M_SiO2 + 10.0 * M_m) + M_MgO * (
+                                                                                                          -6.0 * M_SiO2 + 6.0 * M_m) + 6.0 * M_SiO2 * M_m)) + M_Mg * (
+                                                                                                  M_Fe * (M_FeSiO3 * (
+                                                                                                  -4.0 * M_SiO2 + 10.0 * M_m) + M_MgSiO3 * (
+                                                                                                          -4.0 * M_SiO2 + 10.0 * M_m) + 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                  M_MgO * (
+                                                                                                  2.0 * M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                                                                                                  -4.0 * M_SiO2 + 10.0 * M_m)))) + M_c * (
+                                                                                           M_Fe * (M_MgO * (M_FeSiO3 * (
+                                                                                           M_SiO2 - 3.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                   M_FeSiO3 * (
+                                                                                                   M_SiO2 - 3.0 * M_m) + M_MgO * (
+                                                                                                   2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeSiO3 + M_SiO2) + M_MgSiO3 * (
+                                                                                                   M_FeSiO3 + M_SiO2))) + M_FeSiO3 * M_O * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_SiO2 - M_m)) + M_Mg * (
+                                                                                           M_Fe * (M_FeSiO3 * (
+                                                                                           M_SiO2 - 3.0 * M_m) + M_MgSiO3 * (
+                                                                                                   M_SiO2 - 3.0 * M_m) + M_O * (
+                                                                                                   M_FeSiO3 + M_MgSiO3 + M_SiO2) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_MgO * (
+                                                                                           -M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_SiO2 - 3.0 * M_m) + M_O * (
+                                                                                           M_MgO + M_MgSiO3 + M_SiO2 - M_m)))))) + M_c * (
+                        M_Fe * (M_MgO * (M_FeSiO3 * (
+                        M_SiO2 * (dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                         dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeSiO3 * (
+                        M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                        -dM_FeO_er - 1.0 * dM_FeSiO3_er) + M_m * (dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                        dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_O * (
+                                M_MgO * (
+                                M_FeSiO3 * (dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_SiO2 * (
+                                dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                M_FeSiO3 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_MgO * (
+                                dM_MgO_er + dM_MgSiO3_er) + M_SiO2 * (
+                                dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+                        M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgSiO3 * (M_SiO2 * (
+                        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                 dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_O * (
+                                                                                               M_FeSiO3 * (
+                                                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_MgSiO3 * (
+                                                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_SiO2 * (
+                                                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                               dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                       M_FeSiO3 * (M_SiO2 * (
+                                                                                       1.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                   dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                       M_FeSiO3 * (M_SiO2 * (
+                                                                                       dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                   dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                       M_SiO2 * (
+                                                                                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_O * (
+                                                                                       M_FeSiO3 * (M_MgO * (
+                                                                                       -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er) + M_SiO2 * (
+                                                                                                   dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                   dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                       M_FeSiO3 * (
+                                                                                       dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_MgO * (
+                                                                                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * (
+                                                                                       M_MgO * (
+                                                                                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                       dM_FeO_er + dM_FeSiO3_er)))) + M_O * (
+                        M_MgO * (M_FeSiO3 * (
+                        M_SiO2 * (dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er)) + M_SiO2 * M_m * (
+                                 dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (M_FeSiO3 * (
+                        M_SiO2 * (dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                        dM_FeO_er + dM_MgO_er - dM_SiO2_er)) + M_MgO * (M_SiO2 * (-dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                        dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (dM_FeO_er + dM_FeSiO3_er))) + M_Si * (M_Fe * (
+                        M_MgO * (M_FeSiO3 * (
+                        2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 10.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                 dM_FeO_er + 3.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 4.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                 dM_FeO_er + 3.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                        M_FeSiO3 * (
+                        2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_MgO * (
+                        4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                        dM_FeO_er + 3.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                        dM_FeO_er + 3.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er + 2.0 * dM_SiO2_er)) + M_O * (
+                        M_MgO * (dM_MgO_er + dM_MgSiO3_er) + M_MgSiO3 * (dM_MgO_er + dM_MgSiO3_er))) + M_Mg * (M_Fe * (
+                        M_FeSiO3 * (
+                        2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_MgSiO3 * (
+                        2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_SiO2 * (
+                        dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                        dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                               M_MgO * (
+                                                                                                               -2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                               4.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                               4.0 * dM_FeO_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                                               M_SiO2 * (
+                                                                                                               -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                               dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                                               M_FeSiO3 * (
+                                                                                                               2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                               -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                                                               -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                               9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er)) + M_O * (
+                                                                                                               M_MgO * (
+                                                                                                               -dM_FeO_er - dM_FeSiO3_er) + M_MgSiO3 * (
+                                                                                                               -dM_FeO_er - dM_FeSiO3_er) + M_SiO2 * (
+                                                                                                               -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                               dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                               4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_MgO * (
+                                                                                                           M_FeSiO3 * (
+                                                                                                           M_SiO2 * (
+                                                                                                           4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                           4.0 * dM_FeO_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                           4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                                           M_FeSiO3 * (
+                                                                                                           M_SiO2 * (
+                                                                                                           4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                           4.0 * dM_FeO_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                                           M_SiO2 * (
+                                                                                                           -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                                           4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                           4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           M_SiO2 * (
+                                                                                                           -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                           dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                                           M_SiO2 * (
+                                                                                                           -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                           dM_FeO_er + dM_FeSiO3_er)))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
+
+    def dM_Si_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
+        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
+        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
+        return M_Si * (M_Fe * (M_O * (M_MgO * (M_FeO * (
+        M_SiO2 * (-2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                    4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                    10.0 * dM_FeO_er - 10.0 * dM_MgSiO3_er - 10.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                               6.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+        -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                 -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                 4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                 10.0 * dM_FeO_er + 10.0 * dM_MgO_er - 10.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                                    M_SiO2 * (
+                                                                                                    -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er) + M_m * (
+                                                                                                    6.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                    6.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er))) + dKFeO_KFeO * (
+                               M_O * (M_Mg * (
+                               M_FeO * (M_MgSiO3 * (4.0 * M_SiO2 - 10.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                               M_FeO * (6.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                               2.0 * M_SiO2 + 4.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgO * (
+                                      -6.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                      M_FeO * (6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                      M_FeO * (M_MgO * (6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                      M_FeO * (6.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                                      6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m))) + M_c * (M_Mg * (
+                               M_FeO * (M_MgSiO3 * (-M_SiO2 + 3.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                               M_FeO * (-2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                               -M_SiO2 - M_m) + 2.0 * M_SiO2 * M_m) + M_O * (
+                               M_FeO * (-M_MgSiO3 - M_SiO2) + M_FeSiO3 * (M_MgO - M_m))) + M_MgO * (
+                                                                                                 2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (M_MgO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                                 M_MgO * (
+                                                                                                 -M_FeO * M_SiO2 - M_FeSiO3 * M_m) + M_MgSiO3 * (
+                                                                                                 -M_FeO * M_SiO2 - M_FeSiO3 * M_m))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                       M_O * (M_Fe * (M_MgO * (M_FeO * (2.0 * M_SiO2 + 4.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                       M_FeO * (2.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                       6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_Mg * (M_Fe * (
+                       M_FeO * (2.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                       2.0 * M_SiO2 + 4.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeO * (M_MgO * (
+                       2.0 * M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (-4.0 * M_SiO2 + 10.0 * M_m)))) + M_c * (M_Fe * (
+                       M_MgO * (M_FeO * (-M_SiO2 - M_m) + 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                       M_FeO * (-M_SiO2 - M_m) + M_MgO * (-2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_O * (
+                       M_MgO * (M_FeO - M_m) + M_MgSiO3 * (M_FeO - M_m))) + M_FeO * M_O * (M_MgO * (
+                       M_SiO2 - M_m) + M_MgSiO3 * (M_SiO2 - M_m)) + M_Mg * (M_Fe * (
+                       M_FeO * (-M_SiO2 - M_m) + M_MgO * (-M_SiO2 - M_m) + M_O * (
+                       M_FeO + M_MgO - M_m) + 2.0 * M_SiO2 * M_m) + M_FeO * (M_MgO * (-M_SiO2 - M_m) + M_MgSiO3 * (
+                       M_SiO2 - 3.0 * M_m) + M_O * (M_MgO + M_MgSiO3 + M_SiO2 - M_m))))) + M_Mg * (M_O * (M_Fe * (
+        M_FeO * (
+        M_SiO2 * (-2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+        M_FeO * (-6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_MgO * (
+        -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+        4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+        10.0 * dM_FeO_er + 10.0 * dM_MgO_er - 10.0 * dM_SiO2_er)) + M_MgO * (
+        M_SiO2 * (-2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_MgSiO3 * (
+        M_FeO * (-6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_MgO * (
+        -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+        4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+        10.0 * dM_FeO_er + 10.0 * dM_MgO_er - 10.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+        6.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er)) + M_FeO * (M_MgO * (
+        M_SiO2 * (-2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+        -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                 6.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          -6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                          6.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                                          M_SiO2 * (
+                                                                                                          -2.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                          4.0 * dM_FeO_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                          6.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                          -10.0 * dM_FeSiO3_er + 10.0 * dM_MgO_er - 10.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                          -6.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                                                                          10.0 * dM_FeO_er + 10.0 * dM_MgO_er - 10.0 * dM_SiO2_er)))) + dKMgO_KMgO * (
+                                                                                                   M_O * (M_Fe * (
+                                                                                                   M_MgO * (M_FeSiO3 * (
+                                                                                                   4.0 * M_SiO2 - 10.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO * (
+                                                                                                   2.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                                   6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgO * (
+                                                                                                          -6.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          6.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                                                                                                          6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m))) + M_c * (
+                                                                                                   M_Fe * (M_MgO * (
+                                                                                                   M_FeSiO3 * (
+                                                                                                   -M_SiO2 + 3.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -M_SiO2 - M_m) + M_MgO * (
+                                                                                                           -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           -M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
+                                                                                                           M_FeO - M_m))) + M_MgO * (
+                                                                                                   2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                   M_FeO * (
+                                                                                                   -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                   M_FeO * (M_MgO * (
+                                                                                                   -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                   M_FeO * (
+                                                                                                   -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                                   -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                                   M_MgO * M_SiO2 * (
+                                                                                                   -M_FeO - M_FeSiO3) + M_MgSiO3 * M_m * (
+                                                                                                   -M_FeO - M_FeSiO3))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                       M_O * (M_Fe * M_MgO * (
+                       M_FeO * (2.0 * M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (-4.0 * M_SiO2 + 10.0 * M_m)) + M_Mg * (M_Fe * (
+                       M_FeO * (2.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                       2.0 * M_SiO2 + 4.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeO * (M_MgO * (
+                       2.0 * M_SiO2 + 4.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                       6.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (2.0 * M_SiO2 + 4.0 * M_m) - 6.0 * M_SiO2 * M_m))) + M_c * (
+                       M_Mg * (M_Fe * (M_FeO * (-M_SiO2 - M_m) + M_MgO * (-M_SiO2 - M_m) + M_O * (
+                       M_FeO + M_MgO - M_m) + 2.0 * M_SiO2 * M_m) + M_FeO * (
+                               M_MgO * (-M_SiO2 - M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                               M_FeO * (-2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                               -M_SiO2 - M_m) + 2.0 * M_SiO2 * M_m) + M_O * (
+                               M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_MgO - M_m))) + M_MgO * (M_Fe * (
+                       M_FeO * (-M_SiO2 - M_m) + M_FeSiO3 * (M_SiO2 - 3.0 * M_m) + M_O * (
+                       M_FeO + M_FeSiO3 + M_SiO2 - M_m)) + M_O * (M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+                       M_SiO2 - M_m))))) + M_c * (M_Fe * (M_MgO * (M_FeO * (
+        M_SiO2 * (dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                 -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                 -3.0 * dM_FeO_er + 3.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                   -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                          M_FeO * (M_MgO * (
+                                                          2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                   dM_FeO_er + 2.0 * dM_FeSiO3_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                                   dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                          M_FeO * (
+                                                          2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                          2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                          -3.0 * dM_FeO_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er)) + M_MgO * (
+                                                          M_SiO2 * (2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er) + M_m * (
+                                                          -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                          -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er)) + M_O * (M_MgO * (
+        M_FeO * (-dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_FeSiO3 * (
+        -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_SiO2 * (
+        -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+        dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (M_FeO * (
+        -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er) + M_FeSiO3 * (-dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_SiO2 * (
+                                                                 -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                 dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)))) + M_Mg * (
+                                                  M_Fe * (M_FeO * (M_SiO2 * (
+                                                  dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                                   dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                          M_FeO * (
+                                                          2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                          2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                          -3.0 * dM_FeO_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er)) + M_MgO * (
+                                                          M_SiO2 * (
+                                                          dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                                          M_FeO * (
+                                                          2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                          2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                          -3.0 * dM_FeO_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er)) + M_O * (
+                                                          M_FeO * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_FeSiO3 * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgSiO3 * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_SiO2 * (
+                                                          -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                          -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er)) + M_FeO * (
+                                                  M_MgO * (M_SiO2 * (
+                                                  dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                           dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                  -2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                                                  M_MgO * (
+                                                  2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                  2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_m * (
+                                                  -2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                                                  1.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                                                                                     -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                        -2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                  M_FeO * (M_MgO * (
+                                                  2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                           -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                           3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                  M_FeO * (
+                                                  2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                  2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                  -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                  -3.0 * dM_FeO_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er))) + M_O * (
+                                                  M_FeO * (
+                                                  M_MgO * (-dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_SiO2 * (
+                                                  -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                  dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                  M_MgO * (dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er) + M_SiO2 * (
+                                                  -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                  -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (M_FeO * (
+                                                  -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                         -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er)))) + M_O * (
+                                                  M_MgO * (M_FeO * (M_SiO2 * (
+                                                  -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                    dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                           M_SiO2 * (
+                                                           -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                           -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er))) + M_MgSiO3 * (
+                                                  M_FeO * (M_SiO2 * (
+                                                  -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                           dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                  M_SiO2 * (-dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                  -dM_FeO_er - dM_MgO_er + dM_SiO2_er))))) + dKSiO2_KSiO2 * (M_O * (
+        M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                     M_FeO * (
+                                                                                     -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                     -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                     4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                             4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                             M_FeO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                             M_FeO * (M_MgO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                             M_FeO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                             -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_c * (
+                                                                                                             M_Fe * (
+                                                                                                             M_MgO * (
+                                                                                                             -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) + M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                                             M_MgO * (
+                                                                                                             M_FeSiO3 * (
+                                                                                                             M_FeO - M_m) + M_SiO2 * (
+                                                                                                             M_FeO - M_m)) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_MgO + M_SiO2) + M_FeSiO3 * (
+                                                                                                             M_FeO + M_MgO - M_m) + M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (
+                                                                                                             M_Fe * (
+                                                                                                             M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) + M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) + M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                                                                                             M_FeSiO3 * (
+                                                                                                             M_FeO + M_MgO - M_m) + M_MgSiO3 * (
+                                                                                                             M_FeO + M_MgO - M_m) + M_SiO2 * (
+                                                                                                             M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
+                                                                                                             -M_FeO - M_MgO)) + M_MgO * (
+                                                                                                             -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) + M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                                             M_FeO * M_SiO2 * (
+                                                                                                             M_MgO - M_m) + M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                                                                             M_MgO - M_m)) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_MgO - M_m) + M_FeSiO3 * (
+                                                                                                             M_FeO + M_MgO - M_m)))) + M_O * (
+                                                                                                             M_MgO * (
+                                                                                                             -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                             M_FeO * (
+                                                                                                             M_SiO2 - M_m) + M_MgO * (
+                                                                                                             M_SiO2 - M_m) - M_SiO2 * M_m)))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
+
+    def dM_Fe_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
+        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
+        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
+        return M_Fe * (M_FeSiO3 * dKFeSiO3_KFeSiO3 * (M_Mg * M_O * (4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Si * (
+                                                      M_Mg * (M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                      M_FeO * (-M_SiO2 + M_m) + M_MgO * (
+                                                      -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                              M_FeO * (-3.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                                                              -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                                                              -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_O * (
+                                                      M_MgO * (M_FeO * (
+                                                      -3.0 * M_SiO2 - 6.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                      M_FeO * (-3.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                                                      -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_c * (
+                                                      M_Mg * (-M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                                                      M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                      M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                                                              M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+                                                              M_FeO + M_MgO - M_m))) + M_O * (
+                                                      M_MgO * M_SiO2 * (M_FeO - M_m) + M_MgSiO3 * (
+                                                      M_MgO * (M_SiO2 - M_m) + M_SiO2 * (M_FeO - M_m))) + M_Si * (
+                                                      M_Mg * (M_FeO * (2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                      M_SiO2 - M_m) + M_MgSiO3 * (
+                                                              4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                              M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgO * (
+                                                      M_FeO * (
+                                                      2.0 * M_SiO2 + 2.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                      M_FeO * (2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                      4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                      M_MgO * (M_SiO2 - M_m) + M_MgSiO3 * (M_SiO2 - M_m))))) + M_Mg * (
+                       M_O * (M_FeSiO3 * (M_FeO * (M_SiO2 * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                       4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                       -4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+                                                                         -4.0 * dM_FeO_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                          4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                       M_SiO2 * (4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                       -4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er - 4.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                       4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                             -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                               -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                              M_FeO * (4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_MgO * (
+                              -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er))) + dKMgO_KMgO * (M_O * (M_MgO * (
+                       -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+                       M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                       4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m))) + M_Si * (
+                                                                                       M_MgO * (
+                                                                                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                       M_FeO * (M_MgO * (
+                                                                                       M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       M_SiO2 - M_m) + M_MgO * (
+                                                                                       M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                       M_MgO * (M_FeO * (
+                                                                                       M_SiO2 - 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                9.0 * M_FeO - 2.0 * M_SiO2 - 10.0 * M_m)) + M_MgSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       9.0 * M_MgO - 2.0 * M_SiO2 - 10.0 * M_m) + M_FeSiO3 * (
+                                                                                       9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m)))) + M_c * (
+                                                                                       M_MgO * (
+                                                                                       M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                       M_FeO * (M_MgO * (
+                                                                                       -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       -M_SiO2 + M_m) + M_MgO * (
+                                                                                       -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                       M_FeO * M_MgO * (
+                                                                                       -M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
+                                                                                       -M_FeO * M_MgO + M_FeSiO3 * (
+                                                                                       -M_FeO - M_MgO + M_m))) + M_Si * (
+                                                                                       M_MgO * (M_FeO * (
+                                                                                       -M_SiO2 + M_m) + M_FeSiO3 * (
+                                                                                                -4.0 * M_FeO + M_SiO2 + 3.0 * M_m)) + M_MgSiO3 * (
+                                                                                       M_FeO * (
+                                                                                       -4.0 * M_MgO + M_SiO2 + 3.0 * M_m) + M_FeSiO3 * (
+                                                                                       -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m)) + M_O * (
+                                                                                       M_MgO * (
+                                                                                       -M_FeO - M_FeSiO3) + M_MgSiO3 * (
+                                                                                       -M_FeO - M_FeSiO3)))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                       M_Mg * M_O * (-4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                       4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Si * (M_Mg * (
+                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-2.0 * M_SiO2 - 10.0 * M_m) + M_FeSiO3 * (
+                       9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m))) + M_MgO * M_O * (M_FeO * (
+                       -3.0 * M_SiO2 - 6.0 * M_m) + M_FeSiO3 * (6.0 * M_SiO2 - 15.0 * M_m))) + M_c * (M_Mg * (
+                       M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_O * (
+                       -M_FeO - M_MgO + M_m) + M_SiO2 * M_m)) + M_MgO * M_O * (
+                                                                                                      M_FeO * M_SiO2 + M_FeSiO3 * M_m) + M_Si * (
+                                                                                                      M_Mg * (M_FeO * (
+                                                                                                      M_SiO2 + 3.0 * M_m) + M_FeSiO3 * (
+                                                                                                              -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_O * (
+                                                                                                              -M_FeO - M_FeSiO3)) + M_MgO * (
+                                                                                                      M_FeO * (
+                                                                                                      2.0 * M_SiO2 + 2.0 * M_m) + M_FeSiO3 * (
+                                                                                                      -2.0 * M_SiO2 + 6.0 * M_m))))) + M_Si * (
+                       M_Mg * (M_FeSiO3 * (M_FeO * (M_SiO2 * (-1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                       1.0 * dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                       -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                         -1.0 * dM_FeO_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                           1.0 * dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                       M_SiO2 * (dM_FeO_er + 2.0 * dM_FeSiO3_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                       -1.0 * dM_FeSiO3_er + 1.0 * dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                       dM_FeO_er + dM_FeSiO3_er) + M_m * (-dM_FeO_er - dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                -dM_FeO_er - dM_FeSiO3_er)) + M_O * (
+                               M_FeO * (M_SiO2 * (
+                               3.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                                        6.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 10.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                               M_FeO * (9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er) + M_MgO * (
+                               3.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_SiO2 * (
+                               -6.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+                               -15.0 * dM_FeO_er + 10.0 * dM_MgO_er + 25.0 * dM_MgSiO3_er + 15.0 * dM_SiO2_er)) + M_MgO * (
+                               M_SiO2 * (dM_FeO_er + dM_FeSiO3_er) + M_m * (
+                               -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                               15.0 * dM_FeO_er + 24.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_MgO * (
+                                                                                     9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                                     4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                     -25.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                               -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                               M_FeO * (1.0 * dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                               -dM_FeO_er - dM_FeSiO3_er))) + M_O * (M_MgO * (M_FeO * (M_SiO2 * (
+                       3.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                                                                                       6.0 * dM_FeSiO3_er + 6.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                              M_FeO * (
+                                                                              9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                              -6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 12.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+                                                                              -15.0 * dM_FeO_er + 15.0 * dM_MgSiO3_er + 15.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                              -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                     M_FeO * (M_MgO * (
+                                                                     9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                              3.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 3.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                                                                              6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er + 6.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                     M_FeO * (
+                                                                     9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                     9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                     -6.0 * dM_FeSiO3_er - 6.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+                                                                     -15.0 * dM_FeO_er - 15.0 * dM_MgO_er + 15.0 * dM_SiO2_er)) + M_MgO * (
+                                                                     M_SiO2 * (
+                                                                     9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er) + M_m * (
+                                                                     -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                     -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er))) + dKSiO2_KSiO2 * (
+                       M_O * (M_Mg * (
+                       M_FeO * (M_MgSiO3 * (4.0 * M_SiO2 - 10.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                       M_FeO * (6.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                       2.0 * M_SiO2 + 4.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgO * (
+                              -6.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                              M_FeO * (6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (6.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                              6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m))) + M_c * (M_Mg * (
+                       M_FeO * (M_MgSiO3 * (-M_SiO2 + 3.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                       M_FeO * (-2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (-M_SiO2 - M_m) + 2.0 * M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_MgSiO3 - M_SiO2) + M_FeSiO3 * (M_MgO - M_m))) + M_MgO * (
+                                                                                         2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (M_MgO * (
+                                                                                         -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                         -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                         M_MgO * (
+                                                                                         -M_FeO * M_SiO2 - M_FeSiO3 * M_m) + M_MgSiO3 * (
+                                                                                         -M_FeO * M_SiO2 - M_FeSiO3 * M_m))))) + M_c * (
+                       M_Mg * (M_FeSiO3 * (M_FeO * (
+                       M_SiO2 * (dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_m * (-dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_MgO * (
+                                           M_SiO2 * (
+                                           1.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                                           dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er)) + M_SiO2 * M_m * (
+                                           -dM_MgO_er - 1.0 * dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                       M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                       1.0 * dM_FeSiO3_er - dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                           dM_FeO_er + dM_FeSiO3_er)) + M_O * (
+                               M_FeSiO3 * (M_FeO * (-dM_FeO_er - dM_FeSiO3_er) + M_MgO * (
+                               -dM_FeO_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                           dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er)) + M_MgSiO3 * (
+                               M_FeO * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                               -dM_FeO_er - dM_FeSiO3_er) + M_m * (dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * (
+                               M_FeO * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                               -dM_FeO_er - dM_FeSiO3_er) + M_m * (dM_FeO_er + dM_FeSiO3_er))) + M_SiO2 * M_m * (
+                               M_FeO * (-dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                               dM_FeO_er + dM_FeSiO3_er))) + M_O * (M_MgO * (M_FeSiO3 * (
+                       M_FeO * (-dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                       dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er)) + M_SiO2 * (M_FeO * (
+                       -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                           dM_FeO_er + dM_FeSiO3_er))) + M_MgSiO3 * (
+                                                                    M_FeO * (M_MgO * (
+                                                                    -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                                                                             -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er)) + M_FeSiO3 * (
+                                                                    M_FeO * (
+                                                                    -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_MgO * (
+                                                                    -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                    dM_FeO_er + dM_MgO_er - dM_SiO2_er)) + M_MgO * (
+                                                                    M_SiO2 * (-dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                    dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                    dM_FeO_er + dM_FeSiO3_er))) + M_Si * (M_Mg * (
+                       M_FeO * (M_SiO2 * (
+                       -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                -2.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                       M_FeO * (-4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_MgO * (
+                       -2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_SiO2 * (
+                       2.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                       6.0 * dM_FeO_er - 3.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)) + M_MgO * (
+                       M_SiO2 * (-dM_FeO_er - dM_FeSiO3_er) + M_m * (dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                       -6.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                              -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_SiO2 * (
+                                                                                                              -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                              9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er)) + M_O * (
+                       M_FeO * (-dM_FeO_er - dM_FeSiO3_er) + M_FeSiO3 * (-dM_FeO_er - dM_FeSiO3_er) + M_MgO * (
+                       -dM_FeO_er - dM_FeSiO3_er) + M_MgSiO3 * (-dM_FeO_er - dM_FeSiO3_er) + M_SiO2 * (
+                       -dM_FeO_er - dM_FeSiO3_er) + M_m * (dM_FeO_er + dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                       4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_MgO * (M_FeO * (M_SiO2 * (
+                       -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                  -2.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                         M_FeO * (
+                                                                         -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                         2.0 * dM_FeSiO3_er + 2 * dM_MgO_er + 4.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                         6.0 * dM_FeO_er - 6.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                         4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                          -2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                          -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          2.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                          6.0 * dM_FeO_er + 6.0 * dM_MgO_er - 6.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                                          M_SiO2 * (
+                                                                                                          -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_m * (
+                                                                                                          4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                          4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_O * (
+                                                                                                          M_MgO * (
+                                                                                                          M_FeO * (
+                                                                                                          -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                                                          -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                          dM_FeO_er + dM_FeSiO3_er)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                                                          -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          -dM_FeO_er - dM_FeSiO3_er) + M_m * (
+                                                                                                          dM_FeO_er + dM_FeSiO3_er))))) + dKFeO_KFeO * (
+                       M_Mg * M_O * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                     M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                     M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                     -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Si * (M_Mg * (M_MgO * (
+                       M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          -M_SiO2 + M_m) + M_MgO * (
+                                                                                                          -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                                          M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          -9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                                          -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          -9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+                                                                                                          -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (
+                                                                                                  M_MgO * (
+                                                                                                  9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                  M_FeO * (M_MgO * (
+                                                                                                  -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                                  -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+                       M_Mg * (M_MgO * (
+                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                               M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                               M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (M_MgO - M_m)) + M_MgSiO3 * (
+                               M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_FeO + M_MgO - M_m)))) + M_O * (M_MgO * (
+                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                    M_FeO * (M_MgO * (
+                                                                                                    M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                    M_FeO * (
+                                                                                                    M_SiO2 - M_m) + M_MgO * (
+                                                                                                    M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (
+                       M_Mg * (M_FeO * (M_MgO * (M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                       M_FeO * (4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                       M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                               M_FeO * (4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                               4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
                                M_FeO * (M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                               M_FeO + M_FeSiO3))) + M_MgO * (-4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                       -4 * M_FeO * M_m + M_SiO2 * (4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                       M_FeO * (-4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                       M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO))) + M_O * (
+                               M_FeO + M_FeSiO3))) + M_MgO * (-4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                       M_FeO * (M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                       M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                       4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
                        M_MgO * (M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (M_SiO2 - M_m)) + M_MgSiO3 * (
                        M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (M_SiO2 - M_m))))))) / (M_O * (M_Fe * (M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                                                                  M_FeO * (
-                                                                                                  4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                  -4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                                                                  M_SiO2 * (
-                                                                                                  -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                                  4 * M_FeO + 4 * M_MgO)))) + M_Mg * (
-                                                                                          M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                          -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                                              4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-                                                                                                  M_SiO2 * (
-                                                                                                  -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                                  4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                                  4 * M_FeO + 4 * M_MgO)) + M_MgO * (
-                                                                                          4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                          4 * M_FeO * M_m + M_SiO2 * (
-                                                                                          -4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                                                          M_FeO * (
-                                                                                          4 * M_MgO * M_m + M_SiO2 * (
-                                                                                          -4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                                                          M_SiO2 * (
-                                                                                          -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                          4 * M_FeO + 4 * M_MgO))))) + M_Si * (
+        4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+        -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+        M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+        -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
                                                                                    M_Fe * (M_MgO * (
                                                                                    M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                   M_FeO * M_m + M_SiO2 * (
-                                                                                   -M_FeO + M_m))) + M_MgSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
                                                                                            M_FeO * (
-                                                                                           M_MgO * M_m + M_SiO2 * (
-                                                                                           -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                           M_SiO2 * (
-                                                                                           -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                           M_FeO + M_MgO))) + M_O * (
-                                                                                           M_MgO * (
-                                                                                           4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                                           -9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                           -M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                           4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                                           -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                                           -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (
-                                                                                   M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                   -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                       M_FeO + M_MgO)) + M_MgSiO3 * (
-                                                                                           M_SiO2 * (
-                                                                                           -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                           M_FeO + M_MgO)) + M_O * (
-                                                                                           M_FeSiO3 * (
-                                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-                                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                           -M_FeO - M_MgO + 9 * M_m) + M_m * (
-                                                                                           4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
+                                                                                           -M_SiO2 + M_m) + M_MgO * (
+                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           -M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                                    -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+                                                                                   M_Fe * (M_FeSiO3 * (
+                                                                                   M_FeO * (-M_SiO2 + M_m) + M_MgO * (
+                                                                                   -M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -M_SiO2 + M_m) + M_MgO * (
+                                                                                           -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           -M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                           -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                                                                                           -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
                                                                                            M_FeO + M_MgO)) + M_MgO * (
                                                                                    M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                   M_FeO * M_m + M_SiO2 * (
-                                                                                   -M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                   M_FeO * (M_MgO * M_m + M_SiO2 * (
-                                                                                   -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                   M_SiO2 * (
-                                                                                   -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                   M_FeO + M_MgO))) + M_O * (M_FeO * (
-                                                                                   4 * M_MgO * M_m + M_SiO2 * (
-                                                                                   -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                                             9 * M_FeO * M_m + M_MgO * (
-                                                                                                             -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                                             -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                                             M_FeO * (
-                                                                                                             -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                                             -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
+                                                                                   M_FeO * (
+                                                                                   -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                   M_FeO * (M_MgO * (
+                                                                                   -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                   M_FeO * (-M_SiO2 + M_m) + M_MgO * (
+                                                                                   -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                   M_FeO * (M_MgO * (
+                                                                                   -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   -9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                   -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   -9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+                                                                                   -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (
                                                                                    M_MgO * (
-                                                                                   9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                   9 * M_FeO * M_m + M_SiO2 * (
-                                                                                   -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                   M_FeO * (9 * M_MgO * M_m + M_SiO2 * (
-                                                                                   -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                   M_SiO2 * (
-                                                                                   -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                   9 * M_FeO + 9 * M_MgO))))) + M_c * (
+                                                                                   9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                   M_FeO * (M_MgO * (
+                                                                                   -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                   -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
                                                                                    M_Fe * (M_MgO * (
                                                                                    -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                   -M_FeO * M_m + M_SiO2 * (
-                                                                                   M_FeO - M_m))) + M_MgSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
                                                                                            M_FeO * (
-                                                                                           -M_MgO * M_m + M_SiO2 * (
-                                                                                           M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                           M_SiO2 * (
-                                                                                           M_FeO + M_MgO - M_m) + M_m * (
-                                                                                           -M_FeO - M_MgO))) + M_O * (
+                                                                                           M_SiO2 - M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
                                                                                            M_MgO * (M_FeSiO3 * (
                                                                                            M_FeO - M_m) + M_SiO2 * (
                                                                                                     M_FeO - M_m)) + M_MgSiO3 * (
-                                                                                           M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2) + M_FeSiO3 * (
                                                                                            M_FeO + M_MgO - M_m) + M_MgO * (
-                                                                                           M_FeO - M_m) + M_SiO2 * (
-                                                                                           M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                   M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                   M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                       -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                           M_SiO2 * (
-                                                                                           M_FeO + M_MgO - M_m) + M_m * (
-                                                                                           -M_FeO - M_MgO)) + M_O * (
+                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (
+                                                                                   M_Fe * (M_FeSiO3 * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
                                                                                            M_FeSiO3 * (
                                                                                            M_FeO + M_MgO - M_m) + M_MgSiO3 * (
                                                                                            M_FeO + M_MgO - M_m) + M_SiO2 * (
                                                                                            M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
                                                                                            -M_FeO - M_MgO)) + M_MgO * (
                                                                                    -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                   -M_FeO * M_m + M_SiO2 * (
-                                                                                   M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                   M_FeO * (-M_MgO * M_m + M_SiO2 * (
-                                                                                   M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                   M_SiO2 * (
-                                                                                   M_FeO + M_MgO - M_m) + M_m * (
-                                                                                   -M_FeO - M_MgO))) + M_O * (
+                                                                                   M_FeO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                   M_FeO * (M_MgO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
                                                                                    M_FeO * M_SiO2 * (
-                                                                                   M_MgO - M_m) + M_FeSiO3 * (
-                                                                                   M_FeO * (M_MgO - M_m) + M_SiO2 * (
-                                                                                   M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
+                                                                                   M_MgO - M_m) + M_FeSiO3 * (M_FeO * (
+                                                                                   M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                                                                              M_MgO - M_m)) + M_MgSiO3 * (
                                                                                    M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
                                                                                    M_FeO + M_MgO - M_m)))) + M_O * (
                                                                                    M_MgO * (
                                                                                    -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                   -M_FeO * M_m + M_SiO2 * (
-                                                                                   M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                   M_FeO * (-M_MgO * M_m + M_SiO2 * (
-                                                                                   M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                   M_SiO2 * (
-                                                                                   M_FeO + M_MgO - M_m) + M_m * (
-                                                                                   -M_FeO - M_MgO)))) + M_Si * (M_Fe * (
-                                                                                   M_MgO * (-M_FeO * M_m + M_FeSiO3 * (
-                                                                                   4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                            M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                   -M_FeO * M_m + M_FeSiO3 * (
-                                                                                   4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                   4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                   M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                   M_MgO * (
-                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                                M_Fe * (
-                                                                                                                M_FeSiO3 * (
-                                                                                                                4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                                4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                                M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                                M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                                -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                                -M_MgO * M_m + M_SiO2 * (
-                                                                                                                M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                                -4 * M_FeO * M_m + M_MgO * (
-                                                                                                                4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                                4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                                M_FeO * (
-                                                                                                                4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                                4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                                M_FeO * (
-                                                                                                                M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                                M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                                M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                                -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                                -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                                4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                                M_FeO * (
-                                                                                                                -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                                4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                                M_SiO2 * (
-                                                                                                                4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                                -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                                M_MgO * (
-                                                                                                                M_FeO * (
-                                                                                                                M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                                M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                                M_FeO * (
-                                                                                                                M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                                M_SiO2 - M_m))))))
-
-    def dM_Si_dTc(self, Moles, dKs):
-        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
-        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_Si * (M_Fe * dKFeO_KFeO * (M_O * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (4 * M_SiO2 - 10 * M_m) - 6 * M_SiO2 * M_m) + M_FeSiO3 * (
-        M_SiO2 * (6 * M_FeO + 2 * M_MgO - 6 * M_m) + M_m * (-6 * M_FeO + 4 * M_MgO))) + M_MgO * (
-                                                   -6 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                   -6 * M_FeO * M_m + M_SiO2 * (6 * M_FeO - 6 * M_m))) + M_MgSiO3 * (
-                                                   M_FeO * (
-                                                   -6 * M_MgO * M_m + M_SiO2 * (6 * M_MgO - 6 * M_m)) + M_FeSiO3 * (
-                                                   M_SiO2 * (6 * M_FeO + 6 * M_MgO - 6 * M_m) + M_m * (
-                                                   -6 * M_FeO - 6 * M_MgO)))) + M_c * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (-M_SiO2 + 3 * M_m) + 2 * M_SiO2 * M_m) + M_FeSiO3 * (
-        M_SiO2 * (-2 * M_FeO - M_MgO + 2 * M_m) + M_m * (2 * M_FeO - M_MgO)) + M_O * (
-        M_FeO * (-M_MgSiO3 - M_SiO2) + M_FeSiO3 * (M_MgO - M_m))) + M_MgO * (2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        2 * M_FeO * M_m + M_SiO2 * (-2 * M_FeO + 2 * M_m))) + M_MgSiO3 * (M_FeO * (
-        2 * M_MgO * M_m + M_SiO2 * (-2 * M_MgO + 2 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO))) + M_O * (M_MgO * (
-        -M_FeO * M_SiO2 - M_FeSiO3 * M_m) + M_MgSiO3 * (
-                                                                                     -M_FeO * M_SiO2 - M_FeSiO3 * M_m)))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
-                       M_O * (M_Fe * (M_MgO * (4 * M_FeO * M_m + M_SiO2 * (2 * M_FeO - 6 * M_m)) + M_MgSiO3 * (
-                       M_SiO2 * (2 * M_FeO + 6 * M_MgO - 6 * M_m) + M_m * (4 * M_FeO - 6 * M_MgO))) + M_Mg * (M_Fe * (
-                       M_SiO2 * (2 * M_FeO + 2 * M_MgO - 6 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_FeO * (M_MgO * (
-                       2 * M_SiO2 + 4 * M_m) + M_MgSiO3 * (-4 * M_SiO2 + 10 * M_m)))) + M_c * (M_Fe * (
-                       M_MgO * (-M_FeO * M_m + M_SiO2 * (-M_FeO + 2 * M_m)) + M_MgSiO3 * (
-                       M_SiO2 * (-M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (-M_FeO + 2 * M_MgO)) + M_O * (
-                       M_MgO * (M_FeO - M_m) + M_MgSiO3 * (M_FeO - M_m))) + M_FeO * M_O * (M_MgO * (
-                       M_SiO2 - M_m) + M_MgSiO3 * (M_SiO2 - M_m)) + M_Mg * (M_Fe * (
-                       M_O * (M_FeO + M_MgO - M_m) + M_SiO2 * (-M_FeO - M_MgO + 2 * M_m) + M_m * (
-                       -M_FeO - M_MgO)) + M_FeO * (M_MgO * (-M_SiO2 - M_m) + M_MgSiO3 * (M_SiO2 - 3 * M_m) + M_O * (
-                       M_MgO + M_MgSiO3 + M_SiO2 - M_m))))) + M_Mg * dKMgO_KMgO * (M_O * (M_Fe * (
-        M_MgO * (M_FeSiO3 * (4 * M_SiO2 - 10 * M_m) - 6 * M_SiO2 * M_m) + M_MgSiO3 * (
-        M_SiO2 * (2 * M_FeO + 6 * M_MgO - 6 * M_m) + M_m * (4 * M_FeO - 6 * M_MgO))) + M_MgO * (
-                                                                                          -6 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                          -6 * M_FeO * M_m + M_SiO2 * (
-                                                                                          6 * M_FeO - 6 * M_m))) + M_MgSiO3 * (
-                                                                                          M_FeO * (
-                                                                                          -6 * M_MgO * M_m + M_SiO2 * (
-                                                                                          6 * M_MgO - 6 * M_m)) + M_FeSiO3 * (
-                                                                                          M_SiO2 * (
-                                                                                          6 * M_FeO + 6 * M_MgO - 6 * M_m) + M_m * (
-                                                                                          -6 * M_FeO - 6 * M_MgO)))) + M_c * (
-                                                                                   M_Fe * (M_MgO * (M_FeSiO3 * (
-                                                                                   -M_SiO2 + 3 * M_m) + 2 * M_SiO2 * M_m) + M_MgSiO3 * (
-                                                                                           M_SiO2 * (
-                                                                                           -M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (
-                                                                                           -M_FeO + 2 * M_MgO)) + M_O * (
+                                                                                   M_FeO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                   M_FeO * (M_MgO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                                                   M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (
+                                                                                   M_Fe * (M_MgO * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                   4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
                                                                                            M_MgO * (
-                                                                                           -M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
-                                                                                           M_FeO - M_m))) + M_MgO * (
-                                                                                   2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                   2 * M_FeO * M_m + M_SiO2 * (
-                                                                                   -2 * M_FeO + 2 * M_m))) + M_MgSiO3 * (
-                                                                                   M_FeO * (2 * M_MgO * M_m + M_SiO2 * (
-                                                                                   -2 * M_MgO + 2 * M_m)) + M_FeSiO3 * (
-                                                                                   M_SiO2 * (
-                                                                                   -2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (
-                                                                                   2 * M_FeO + 2 * M_MgO))) + M_O * (
-                                                                                   M_MgO * M_SiO2 * (
-                                                                                   -M_FeO - M_FeSiO3) + M_MgSiO3 * M_m * (
-                                                                                   -M_FeO - M_FeSiO3)))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
-                       M_O * (
-                       M_Fe * M_MgO * (M_FeO * (2 * M_SiO2 + 4 * M_m) + M_FeSiO3 * (-4 * M_SiO2 + 10 * M_m)) + M_Mg * (
-                       M_Fe * (M_SiO2 * (2 * M_FeO + 2 * M_MgO - 6 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_FeO * (
-                       4 * M_MgO * M_m + M_SiO2 * (2 * M_MgO - 6 * M_m)) + M_FeSiO3 * (
-                       M_SiO2 * (6 * M_FeO + 2 * M_MgO - 6 * M_m) + M_m * (-6 * M_FeO + 4 * M_MgO)))) + M_c * (M_Mg * (
-                       M_Fe * (M_O * (M_FeO + M_MgO - M_m) + M_SiO2 * (-M_FeO - M_MgO + 2 * M_m) + M_m * (
-                       -M_FeO - M_MgO)) + M_FeO * (-M_MgO * M_m + M_SiO2 * (-M_MgO + 2 * M_m)) + M_FeSiO3 * (
-                       M_SiO2 * (-2 * M_FeO - M_MgO + 2 * M_m) + M_m * (2 * M_FeO - M_MgO)) + M_O * (
-                       M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_MgO - M_m))) + M_MgO * (M_Fe * (
-                       M_FeO * (-M_SiO2 - M_m) + M_FeSiO3 * (M_SiO2 - 3 * M_m) + M_O * (
-                       M_FeO + M_FeSiO3 + M_SiO2 - M_m)) + M_O * (M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
-                       M_SiO2 - M_m))))) + dKSiO2_KSiO2 * (M_O * (M_Fe * (M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                                          M_FeO * (4 * M_MgO * M_m + M_SiO2 * (
-                                                                          -4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                                          M_SiO2 * (
-                                                                          -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                          4 * M_FeO + 4 * M_MgO)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-        4 * M_FeO + 4 * M_MgO)) + M_MgO * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (M_FeO * (
-        4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_c * (M_Fe * (
-        M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-        M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-        M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-        M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
-        M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (M_FeO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
-        M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (
-        -M_FeO - M_MgO))) + M_O * (M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
-        M_FeO * (M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                   M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_FeO + M_MgO - M_m)))) + M_O * (M_MgO * (
-        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (
-        -M_FeO - M_MgO))))))) / (M_O * (M_Fe * (M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                M_FeO * (
-                                                4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                4 * M_FeO + 4 * M_MgO)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-        4 * M_FeO + 4 * M_MgO)) + M_MgO * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (M_FeO * (
-        4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-        M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-        M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-        4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                           4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                           -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                           -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (
-                                                                                        M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                            M_FeO + M_MgO)) + M_MgSiO3 * (
-                                                                                                M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                M_FeO + M_MgO)) + M_O * (
-                                                                                                M_FeSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + 9 * M_m) + M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                                M_FeO + M_MgO)) + M_MgO * (
-                                                                                        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        M_FeO * M_m + M_SiO2 * (
-                                                                                        -M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                        M_FeO + M_MgO))) + M_O * (
-                                                                                        M_FeO * (
-                                                                                        4 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_MgO * (
-                                                                                        -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                        -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
-                                                                                        M_MgO * (
-                                                                                        9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_SiO2 * (
-                                                                                        -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        9 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                        9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                                 M_Fe * (M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                 -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                                         M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-                                         M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-                                         M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
-                                         M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (M_FeO - M_m) + M_SiO2 * (
-                                         M_FeO + M_MgO - M_m)))) + M_Mg * (M_Fe * (
-                                 M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_MgSiO3 * (
-                                 M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-                                 M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                 M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (
-                                                                           -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                           -M_FeO * M_m + M_SiO2 * (
-                                                                           M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-                                 -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                 M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-                                                                           M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
-                                                                           M_FeO * (M_MgO - M_m) + M_SiO2 * (
-                                                                           M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                           M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
-                                                                           M_FeO + M_MgO - M_m)))) + M_O * (M_MgO * (
-                                 -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                 -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-                                 -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                 M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)))) + M_Si * (M_Fe * (M_MgO * (
-                                 -M_FeO * M_m + M_FeSiO3 * (4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                 M_FeO - 4 * M_m)) + M_MgSiO3 * (-M_FeO * M_m + M_FeSiO3 * (
-                                 4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                 M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (M_MgO * (
-                                 M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                        M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                            M_Fe * (M_FeSiO3 * (
-                                                                                            4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                    4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                    M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                    M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                    -M_FeO - M_MgO)) + M_FeO * (
-                                                                                            -M_MgO * M_m + M_SiO2 * (
-                                                                                            M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                            -4 * M_FeO * M_m + M_MgO * (
-                                                                                            4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                            4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                            M_FeO * (
-                                                                                            4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                            4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                            M_FeO * (
-                                                                                            M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                            M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                            M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                            -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                            -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                            4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                            M_FeO * (
-                                                                                            -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                            4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                            M_SiO2 * (
-                                                                                            4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                            -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                            M_MgO * (M_FeO * (
-                                                                                            M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                     M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                            M_FeO * (
-                                                                                            M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                            M_SiO2 - M_m))))))
+                                                                                           M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                   M_Fe * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                   M_MgO * (
+                                                                                   M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                   M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                   M_FeO * (
+                                                                                   M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                   M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                   M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                   -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                   M_FeO * (M_MgO * (
+                                                                                   4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                   M_FeO * (
+                                                                                   4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                   4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                   M_MgO * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                   M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                   M_SiO2 - M_m))))))
 
-    def dM_FeO_dTc(self, Moles, dKs):
+    def dM_Mg_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
         M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
         dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_FeO * (M_Fe * dKFeO_KFeO * (M_Mg * M_O * (
-        M_MgO * (M_FeSiO3 * (4 * M_SiO2 - 4 * M_m) - 4 * M_SiO2 * M_m) + M_MgSiO3 * (
-        -4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m))) + M_Si * (M_Mg * (
-        M_MgO * (M_FeSiO3 * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_O * (
-        M_FeSiO3 * (9 * M_MgO + 6 * M_SiO2 - 15 * M_m) - 4 * M_MgO * M_m + M_MgSiO3 * (
-        9 * M_MgO + 4 * M_SiO2 - 25 * M_m) + M_SiO2 * (M_MgO - 9 * M_m))) + M_O * (M_MgO * (
-        M_FeSiO3 * (6 * M_SiO2 - 15 * M_m) - 9 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeSiO3 * (
-        6 * M_SiO2 - 15 * M_m) - 9 * M_MgO * M_m + M_SiO2 * (9 * M_MgO - 9 * M_m)))) + M_c * (M_Mg * (
-        M_MgO * (M_FeSiO3 * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
-        M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_O * (
-        M_FeSiO3 * (-M_MgO + M_m) + M_MgSiO3 * (-M_MgO + M_m) + M_SiO2 * (-M_MgO + M_m))) + M_O * (M_MgO * M_m * (
-        M_FeSiO3 + M_SiO2) + M_MgSiO3 * (M_SiO2 * (-M_MgO + M_m) + M_m * (M_FeSiO3 + M_MgO))) + M_Si * (M_Mg * (
-        M_FeSiO3 * (-4 * M_MgO - 2 * M_SiO2 + 6 * M_m) + M_MgO * M_m + M_MgSiO3 * (
-        -4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (-M_MgO - M_MgSiO3 - M_SiO2 + M_m) + M_SiO2 * (
-        -M_MgO + 4 * M_m)) + M_MgO * (M_FeSiO3 * (-2 * M_SiO2 + 6 * M_m) + 4 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeSiO3 * (
-        -2 * M_SiO2 + 6 * M_m) + 4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_O * (M_MgO * (
-        -M_SiO2 + M_m) + M_MgSiO3 * (-M_SiO2 + M_m))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (M_O * (
-        M_Fe * (4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m))) + M_Mg * (
-        M_MgSiO3 * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_SiO2 * M_m * (
-        4 * M_Fe + 4 * M_MgO))) + M_Si * (M_Fe * (
-        M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_O * (
-        M_MgO * (2 * M_SiO2 + 10 * M_m) + M_MgSiO3 * (-9 * M_MgO + 2 * M_SiO2 + 10 * M_m))) + M_Mg * (M_Fe * (
-        M_O * (2 * M_SiO2 + 10 * M_m) + M_SiO2 * M_m) + M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * M_m + M_SiO2 * (
-        -M_MgO + M_m)) + M_O * (4 * M_MgO * M_m + M_MgSiO3 * (-9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-        -M_MgO + 9 * M_m))) + M_O * (9 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        9 * M_MgO * M_m + M_SiO2 * (-9 * M_MgO + 9 * M_m)))) + M_c * (M_Fe * (
-        -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * (M_O - M_m) + M_SiO2 * (M_MgO - M_m))) + M_Mg * (M_MgSiO3 * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_O * (M_MgSiO3 * (M_MgO - M_m) + M_SiO2 * (
-        M_MgO - M_m)) + M_SiO2 * M_m * (-M_Fe - M_MgO)) + M_O * (-M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m))) + M_Si * (M_Fe * (
-        M_MgO * (-M_SiO2 - 3 * M_m) + M_MgSiO3 * (4 * M_MgO - M_SiO2 - 3 * M_m) + M_O * (M_MgO + M_MgSiO3)) + M_Mg * (
-                                                          M_Fe * (M_O - M_SiO2 - 3 * M_m) - M_MgO * M_m + M_MgSiO3 * (
-                                                          4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                          M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                          M_MgO - 4 * M_m)) - 4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-                                                          -4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m)) + M_O * (
-                                                          M_MgO * (M_SiO2 - M_m) + M_MgSiO3 * (
-                                                          M_SiO2 - M_m))))) + M_Mg * dKMgO_KMgO * (M_Fe * M_O * (
-        M_MgO * (M_FeSiO3 * (-4 * M_SiO2 + 4 * M_m) + 4 * M_SiO2 * M_m) + M_MgSiO3 * (
-        4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m))) + M_Si * (M_Fe * (
-        M_MgO * (M_FeSiO3 * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
-        M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_O * (M_MgO * (-9 * M_FeSiO3 - M_SiO2 + 4 * M_m) + M_MgSiO3 * (
-        -9 * M_MgO + 2 * M_SiO2 + 10 * M_m))) + M_FeSiO3 * M_O * (M_MgO * (-3 * M_SiO2 - 6 * M_m) + M_MgSiO3 * (
-        6 * M_SiO2 - 15 * M_m))) + M_c * (M_Fe * (
-        M_MgO * (M_FeSiO3 * (M_SiO2 - M_m) + M_O * (M_FeSiO3 + M_MgSiO3 + M_SiO2) - M_SiO2 * M_m) + M_MgSiO3 * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m))) + M_FeSiO3 * M_O * (M_MgO * M_SiO2 + M_MgSiO3 * M_m) + M_Si * (M_Fe * (
-        M_MgO * (4 * M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (4 * M_MgO - M_SiO2 - 3 * M_m) + M_O * (
-        M_MgO + M_MgSiO3)) + M_FeSiO3 * (M_MgO * (2 * M_SiO2 + 2 * M_m) + M_MgSiO3 * (
-        -2 * M_SiO2 + 6 * M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_O * (
-        M_Fe * M_FeSiO3 * M_MgO * (4 * M_SiO2 - 4 * M_m) + M_Mg * (
-        4 * M_Fe * M_SiO2 * M_m + M_FeSiO3 * M_MgO * (4 * M_SiO2 - 4 * M_m))) + M_Si * (M_Mg * (
-        M_Fe * (M_O * (2 * M_SiO2 + 10 * M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
-        M_MgO * (M_SiO2 - M_m) + M_O * (9 * M_MgO + 6 * M_SiO2 - 15 * M_m))) + M_MgO * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 - M_m) + M_O * (9 * M_FeSiO3 + 3 * M_SiO2 + 6 * M_m)) + M_FeSiO3 * M_O * (
-                                                                                        9 * M_SiO2 - 9 * M_m))) + M_c * (
-                                                                    M_Mg * (-M_Fe * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                    M_MgO * (-M_SiO2 + M_m) + M_O * (
-                                                                    -M_MgO + M_m))) + M_MgO * (M_Fe * (
-                                                                    M_FeSiO3 * (-M_SiO2 + M_m) + M_O * (
-                                                                    -M_FeSiO3 - M_SiO2)) + M_FeSiO3 * M_O * (
-                                                                                               -M_SiO2 + M_m)) + M_Si * (
-                                                                    M_Mg * (
-                                                                    M_Fe * (M_O - M_SiO2 - 3 * M_m) + M_FeSiO3 * (
-                                                                    -4 * M_MgO - 2 * M_SiO2 + 6 * M_m)) + M_MgO * (
-                                                                    M_Fe * (
-                                                                    -4 * M_FeSiO3 - 2 * M_SiO2 - 2 * M_m) + M_FeSiO3 * (
-                                                                    -4 * M_SiO2 + 4 * M_m))))) + M_Si * dKSiO2_KSiO2 * (
-                        M_O * (M_Fe * (M_MgO * (M_FeSiO3 * (-4 * M_SiO2 + 10 * M_m) + 6 * M_SiO2 * M_m) + M_MgSiO3 * (
-                        M_FeSiO3 * (-4 * M_SiO2 + 10 * M_m) + 6 * M_MgO * M_m + M_SiO2 * (
-                        -6 * M_MgO + 6 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (-4 * M_SiO2 + 10 * M_m) + M_MgSiO3 * (
-                        -4 * M_SiO2 + 10 * M_m) + 6 * M_SiO2 * M_m) + M_FeSiO3 * (
-                                                          M_MgO * (2 * M_SiO2 + 4 * M_m) + M_MgSiO3 * (
-                                                          -4 * M_SiO2 + 10 * M_m)))) + M_c * (M_Fe * (
-                        M_MgO * (M_FeSiO3 * (M_SiO2 - 3 * M_m) - 2 * M_SiO2 * M_m) + M_MgSiO3 * (
-                        M_FeSiO3 * (M_SiO2 - 3 * M_m) - 2 * M_MgO * M_m + M_SiO2 * (2 * M_MgO - 2 * M_m)) + M_O * (
-                        M_MgO * (M_FeSiO3 + M_SiO2) + M_MgSiO3 * (M_FeSiO3 + M_SiO2))) + M_FeSiO3 * M_O * (M_MgO * (
-                        M_SiO2 - M_m) + M_MgSiO3 * (M_SiO2 - M_m)) + M_Mg * (M_Fe * (
-                        M_FeSiO3 * (M_SiO2 - 3 * M_m) + M_MgSiO3 * (M_SiO2 - 3 * M_m) + M_O * (
-                        M_FeSiO3 + M_MgSiO3 + M_SiO2) - 2 * M_SiO2 * M_m) + M_FeSiO3 * (
-                                                                             M_MgO * (-M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                             M_SiO2 - 3 * M_m) + M_O * (
-                                                                             M_MgO + M_MgSiO3 + M_SiO2 - M_m)))))) / (
-               M_O * (M_Fe * (M_MgO * (
-               4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                              M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)))) + M_Mg * (
-                      M_Fe * (M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                              4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgO * (
-                      4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                      4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                      M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-               M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-               4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-               -M_FeO + 9 * M_m)) + M_MgSiO3 * (4 * M_FeO * M_m + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (-9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (M_Fe * (
-               M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_MgSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-               M_FeSiO3 * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO - M_MgO + 9 * M_m) + M_m * (
-               4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (M_FeO + M_MgO)) + M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-               M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (M_FeO * (
-               M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-               M_FeO + M_MgO))) + M_O * (M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-M_MgO + 9 * M_m)) + M_FeSiO3 * (
-               9 * M_FeO * M_m + M_MgO * (-9 * M_FeO + 4 * M_m) + M_SiO2 * (
-               -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (M_FeO * (-9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (M_MgO * (
-               9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (9 * M_FeO * M_m + M_SiO2 * (-9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                           M_FeO * (9 * M_MgO * M_m + M_SiO2 * (
-                                                                           -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                           M_SiO2 * (
-                                                                           -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                           9 * M_FeO + 9 * M_MgO))))) + M_c * (M_Fe * (
-               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-               M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-               M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
-               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (M_FeO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_O * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO))) + M_O * (
-                                                                                                               M_FeO * M_SiO2 * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)))) + M_Si * (
-                                                                                                               M_Fe * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                                               4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                               M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_MgO * (
-                                                                                                               4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                               4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                               -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                               4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                               4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m))))))
-
-    def dM_c_dTc(self, Moles, dKs):
-        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
-        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_c * (M_Fe * dKFeO_KFeO * (M_O * (M_Mg * (M_FeO * M_m * (-2 * M_MgSiO3 - 2 * M_SiO2) + M_FeSiO3 * (
-        -2 * M_FeO * M_m + M_SiO2 * (2 * M_FeO + 2 * M_MgO - 2 * M_m))) + M_MgO * (
-                                                  -2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                  -2 * M_FeO * M_m + M_SiO2 * (2 * M_FeO - 2 * M_m))) + M_MgSiO3 * (
-                                                  M_FeO * (
-                                                  -2 * M_MgO * M_m + M_SiO2 * (2 * M_MgO - 2 * M_m)) + M_FeSiO3 * (
-                                                  M_SiO2 * (2 * M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (
-                                                  -2 * M_FeO - 2 * M_MgO)))) + M_Si * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (M_SiO2 - 3 * M_m) - 2 * M_SiO2 * M_m) + M_FeSiO3 * (
-        M_SiO2 * (2 * M_FeO + M_MgO - 2 * M_m) + M_m * (-2 * M_FeO + M_MgO)) + M_O * (
-        M_FeO * (-3 * M_MgSiO3 - M_SiO2 - 2 * M_m) + M_FeSiO3 * (3 * M_MgO + 2 * M_SiO2 - 5 * M_m))) + M_MgO * (
-                                                                                       -2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                       -2 * M_FeO * M_m + M_SiO2 * (
-                                                                                       2 * M_FeO - 2 * M_m))) + M_MgSiO3 * (
-                                                                                       M_FeO * (
-                                                                                       -2 * M_MgO * M_m + M_SiO2 * (
-                                                                                       2 * M_MgO - 2 * M_m)) + M_FeSiO3 * (
-                                                                                       M_SiO2 * (
-                                                                                       2 * M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (
-                                                                                       -2 * M_FeO - 2 * M_MgO))) + M_O * (
-                                                                                       M_MgO * (M_FeO * (
-                                                                                       -M_SiO2 - 2 * M_m) + M_FeSiO3 * (
-                                                                                                2 * M_SiO2 - 5 * M_m)) + M_MgSiO3 * (
-                                                                                       M_FeO * (
-                                                                                       -M_SiO2 - 2 * M_m) + M_FeSiO3 * (
-                                                                                       2 * M_SiO2 - 5 * M_m))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
-                      M_O * (M_Fe * (M_MgO * M_SiO2 * (2 * M_FeO - 2 * M_m) + M_MgSiO3 * (
-                      -2 * M_MgO * M_m + M_SiO2 * (2 * M_FeO + 2 * M_MgO - 2 * M_m))) + M_Mg * (
-                             2 * M_FeO * M_MgSiO3 * M_m + M_SiO2 * (
-                             M_Fe * (2 * M_FeO + 2 * M_MgO - 2 * M_m) + 2 * M_FeO * M_MgO))) + M_Si * (M_Fe * (
-                      M_MgO * (M_FeO * M_m + M_SiO2 * (M_FeO - 2 * M_m)) + M_MgSiO3 * (
-                      M_SiO2 * (M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (M_FeO - 2 * M_MgO)) + M_O * (
-                      M_MgO * (3 * M_FeO + 2 * M_SiO2 - 5 * M_m) + M_MgSiO3 * (
-                      3 * M_FeO + 2 * M_SiO2 - 5 * M_m))) + M_FeO * M_O * (M_MgO * (3 * M_SiO2 - 3 * M_m) + M_MgSiO3 * (
-                      3 * M_SiO2 - 3 * M_m)) + M_Mg * (M_Fe * (
-                      M_O * (3 * M_FeO + 3 * M_MgO + 2 * M_SiO2 - 5 * M_m) + M_SiO2 * (
-                      M_FeO + M_MgO - 2 * M_m) + M_m * (M_FeO + M_MgO)) + M_FeO * (
-                                                       M_MgO * (M_SiO2 + M_m) + M_MgSiO3 * (-M_SiO2 + 3 * M_m) + M_O * (
-                                                       3 * M_MgO + 3 * M_MgSiO3 + 3 * M_SiO2 - 3 * M_m))))) + M_Mg * dKMgO_KMgO * (
-                      M_O * (M_Fe * (M_MgO * M_m * (-2 * M_FeSiO3 - 2 * M_SiO2) + M_MgSiO3 * (
-                      -2 * M_MgO * M_m + M_SiO2 * (2 * M_FeO + 2 * M_MgO - 2 * M_m))) + M_MgO * (
-                             -2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                             -2 * M_FeO * M_m + M_SiO2 * (2 * M_FeO - 2 * M_m))) + M_MgSiO3 * (
-                             M_FeO * (-2 * M_MgO * M_m + M_SiO2 * (2 * M_MgO - 2 * M_m)) + M_FeSiO3 * (
-                             M_SiO2 * (2 * M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (-2 * M_FeO - 2 * M_MgO)))) + M_Si * (
-                      M_Fe * (M_MgO * (M_FeSiO3 * (M_SiO2 - 3 * M_m) - 2 * M_SiO2 * M_m) + M_MgSiO3 * (
-                      M_SiO2 * (M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (M_FeO - 2 * M_MgO)) + M_O * (
-                              M_MgO * (-3 * M_FeSiO3 - M_SiO2 - 2 * M_m) + M_MgSiO3 * (
-                              3 * M_FeO + 2 * M_SiO2 - 5 * M_m))) + M_MgO * (-2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                      -2 * M_FeO * M_m + M_SiO2 * (2 * M_FeO - 2 * M_m))) + M_MgSiO3 * (
-                      M_FeO * (-2 * M_MgO * M_m + M_SiO2 * (2 * M_MgO - 2 * M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (2 * M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (-2 * M_FeO - 2 * M_MgO))) + M_O * (
-                      M_MgO * (M_FeO * (-M_SiO2 - 2 * M_m) + M_FeSiO3 * (-M_SiO2 - 2 * M_m)) + M_MgSiO3 * (
-                      M_FeO * (2 * M_SiO2 - 5 * M_m) + M_FeSiO3 * (
-                      2 * M_SiO2 - 5 * M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_O * (
-        M_Fe * M_MgO * (2 * M_FeO * M_SiO2 + 2 * M_FeSiO3 * M_m) + M_Mg * (
-        M_FeSiO3 * (-2 * M_FeO * M_m + M_SiO2 * (2 * M_FeO + 2 * M_MgO - 2 * M_m)) + M_SiO2 * (
-        M_Fe * (2 * M_FeO + 2 * M_MgO - 2 * M_m) + M_FeO * (2 * M_MgO - 2 * M_m)))) + M_Si * (M_Mg * (M_Fe * (
-        M_O * (3 * M_FeO + 3 * M_MgO + 2 * M_SiO2 - 5 * M_m) + M_SiO2 * (M_FeO + M_MgO - 2 * M_m) + M_m * (
-        M_FeO + M_MgO)) + M_FeO * (M_MgO * M_m + M_SiO2 * (M_MgO - 2 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        2 * M_FeO + M_MgO - 2 * M_m) + M_m * (-2 * M_FeO + M_MgO)) + M_O * (M_FeO * (
-        3 * M_MgO + 2 * M_SiO2 - 5 * M_m) + M_FeSiO3 * (3 * M_MgO + 2 * M_SiO2 - 5 * M_m))) + M_MgO * (M_Fe * (
-        M_FeO * (M_SiO2 + M_m) + M_FeSiO3 * (-M_SiO2 + 3 * M_m) + M_O * (
-        3 * M_FeO + 3 * M_FeSiO3 + 3 * M_SiO2 - 3 * M_m)) + M_O * (M_FeO * (3 * M_SiO2 - 3 * M_m) + M_FeSiO3 * (
-        3 * M_SiO2 - 3 * M_m))))) + M_Si * dKSiO2_KSiO2 * (M_Fe * (
-        M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-        M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (
-        M_MgO * (M_FeSiO3 * (3 * M_FeO - 5 * M_m) + M_SiO2 * (M_FeO - 3 * M_m)) + M_MgSiO3 * (
-        M_FeSiO3 * (3 * M_FeO + 3 * M_MgO - 5 * M_m) + M_MgO * (3 * M_FeO - 3 * M_m) + M_SiO2 * (
-        M_FeO + 3 * M_MgO - 3 * M_m)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_FeSiO3 * (3 * M_FeO + 3 * M_MgO - 5 * M_m) + M_MgSiO3 * (3 * M_FeO + 3 * M_MgO - 5 * M_m) + M_SiO2 * (
-        M_FeO + M_MgO - 3 * M_m)) + M_SiO2 * M_m * (M_FeO + M_MgO)) + M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-                                                  M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-                                                  M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (
-                                                  M_FeO * M_SiO2 * (M_MgO - 3 * M_m) + M_FeSiO3 * (
-                                                  M_FeO * (3 * M_MgO - 3 * M_m) + M_SiO2 * (
-                                                  3 * M_FeO + M_MgO - 3 * M_m)) + M_MgSiO3 * (
-                                                  M_FeO * (3 * M_MgO - 5 * M_m) + M_FeSiO3 * (
-                                                  3 * M_FeO + 3 * M_MgO - 5 * M_m)))) + M_O * (M_MgO * (
-        -3 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-3 * M_FeO * M_m + M_SiO2 * (3 * M_FeO - 3 * M_m))) + M_MgSiO3 * (
-                                                                                               M_FeO * (
-                                                                                               -3 * M_MgO * M_m + M_SiO2 * (
-                                                                                               3 * M_MgO - 3 * M_m)) + M_FeSiO3 * (
-                                                                                               M_SiO2 * (
-                                                                                               3 * M_FeO + 3 * M_MgO - 3 * M_m) + M_m * (
-                                                                                               -3 * M_FeO - 3 * M_MgO)))))) / (
-               M_O * (M_Fe * (M_MgO * (
-               4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                              M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)))) + M_Mg * (
-                      M_Fe * (M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                              4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgO * (
-                      4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                      4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                      M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-               M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-               4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-               -M_FeO + 9 * M_m)) + M_MgSiO3 * (4 * M_FeO * M_m + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (-9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (M_Fe * (
-               M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_MgSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-               M_FeSiO3 * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO - M_MgO + 9 * M_m) + M_m * (
-               4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (M_FeO + M_MgO)) + M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-               M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (M_FeO * (
-               M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-               M_FeO + M_MgO))) + M_O * (M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-M_MgO + 9 * M_m)) + M_FeSiO3 * (
-               9 * M_FeO * M_m + M_MgO * (-9 * M_FeO + 4 * M_m) + M_SiO2 * (
-               -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (M_FeO * (-9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (M_MgO * (
-               9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (9 * M_FeO * M_m + M_SiO2 * (-9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                           M_FeO * (9 * M_MgO * M_m + M_SiO2 * (
-                                                                           -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                           M_SiO2 * (
-                                                                           -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                           9 * M_FeO + 9 * M_MgO))))) + M_c * (M_Fe * (
-               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-               M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-               M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
-               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (M_FeO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_O * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO))) + M_O * (
-                                                                                                               M_FeO * M_SiO2 * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)))) + M_Si * (
-                                                                                                               M_Fe * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                                               4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                               M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_MgO * (
-                                                                                                               4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                               4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                               -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                               4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                               4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m))))))
-
-    def dM_Mg_dTc(self, Moles, dKs):
-        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
-        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_Mg * (M_Fe * dKFeO_KFeO * (M_O * (M_MgO * (
-        -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-4 * M_FeO * M_m + M_SiO2 * (4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                   M_FeO * (
-                                                   -4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                   M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                   -4 * M_FeO - 4 * M_MgO)))) + M_Si * (M_MgO * (
-        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (
-        -M_FeO - M_MgO))) + M_O * (M_MgO * (
-        M_FeO * (M_SiO2 - 4 * M_m) + M_FeSiO3 * (9 * M_FeO - 2 * M_SiO2 - 10 * M_m)) + M_MgSiO3 * (
-                                   M_FeO * (9 * M_MgO - 2 * M_SiO2 - 10 * M_m) + M_FeSiO3 * (
-                                   9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m)))) + M_c * (M_MgO * (
-        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (M_FeO * (
-        M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-        M_FeO + M_MgO))) + M_O * (M_FeO * M_MgO * (-M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
-        -M_FeO * M_MgO + M_FeSiO3 * (-M_FeO - M_MgO + M_m))) + M_Si * (M_MgO * (
-        M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (-4 * M_FeO + M_SiO2 + 3 * M_m)) + M_MgSiO3 * (M_FeO * (
-        -4 * M_MgO + M_SiO2 + 3 * M_m) + M_FeSiO3 * (-4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m)) + M_O * (
-                                                                       M_MgO * (-M_FeO - M_FeSiO3) + M_MgSiO3 * (
-                                                                       -M_FeO - M_FeSiO3))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
-                       M_Fe * M_O * (-4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-                       M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO))) + M_Si * (M_Fe * (
+        return M_Mg * (M_Fe * (M_O * (M_FeSiO3 * (M_FeO * (
+        M_SiO2 * (4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                  M_SiO2 * (
+                                                  4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_m * (
+                                                  4.0 * dM_FeO_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                  -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+        M_SiO2 * (-4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_m * (
+        4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er + 4.0 * dM_SiO2_er)) + M_MgO * (M_SiO2 * (
+        -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er) + M_m * (4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                                        4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                      M_FeO * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                      4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er))) + dKFeO_KFeO * (M_O * (M_MgO * (
+        -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+        M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+        4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m))) + M_Si * (M_MgO * (
+        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (
+        M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (M_MgO * (
+        M_FeO * (M_SiO2 - 4.0 * M_m) + M_FeSiO3 * (9.0 * M_FeO - 2.0 * M_SiO2 - 10.0 * M_m)) + M_MgSiO3 * (
+                                                M_FeO * (9.0 * M_MgO - 2.0 * M_SiO2 - 10.0 * M_m) + M_FeSiO3 * (
+                                                9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m)))) + M_c * (
+                                                                                              M_MgO * (
+                                                                                              M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                              M_FeO * (
+                                                                                              -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                              M_FeO * (M_MgO * (
+                                                                                              -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                              M_FeO * (
+                                                                                              -M_SiO2 + M_m) + M_MgO * (
+                                                                                              -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                              M_FeO * M_MgO * (
+                                                                                              -M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
+                                                                                              -M_FeO * M_MgO + M_FeSiO3 * (
+                                                                                              -M_FeO - M_MgO + M_m))) + M_Si * (
+                                                                                              M_MgO * (M_FeO * (
+                                                                                              -M_SiO2 + M_m) + M_FeSiO3 * (
+                                                                                                       -4.0 * M_FeO + M_SiO2 + 3.0 * M_m)) + M_MgSiO3 * (
+                                                                                              M_FeO * (
+                                                                                              -4.0 * M_MgO + M_SiO2 + 3.0 * M_m) + M_FeSiO3 * (
+                                                                                              -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m)) + M_O * (
+                                                                                              M_MgO * (
+                                                                                              -M_FeO - M_FeSiO3) + M_MgSiO3 * (
+                                                                                              -M_FeO - M_FeSiO3)))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                       M_Fe * M_O * (-4.0 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
+                       M_FeO * (4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                       4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_Si * (M_Fe * (
                        -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-                       M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-                       M_MgO * (-2 * M_SiO2 - 10 * M_m) + M_MgSiO3 * (
-                       9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m))) + M_FeO * M_O * (M_MgO * (
-                       -3 * M_SiO2 - 6 * M_m) + M_MgSiO3 * (6 * M_SiO2 - 15 * M_m))) + M_c * (M_Fe * (
-                       M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-                       M_O * (-M_FeO - M_MgO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-                       M_FeO + M_MgO))) + M_FeO * M_O * (M_MgO * M_SiO2 + M_MgSiO3 * M_m) + M_Si * (M_Fe * (
-                       M_MgO * (M_SiO2 + 3 * M_m) + M_MgSiO3 * (-4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (
-                       -M_MgO - M_MgSiO3)) + M_FeO * (M_MgO * (2 * M_SiO2 + 2 * M_m) + M_MgSiO3 * (
-                       -2 * M_SiO2 + 6 * M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_Fe * M_O * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))) + M_Si * (M_Fe * (
-        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_FeSiO3 * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO - 3 * M_MgO + 9 * M_m) + M_m * (
-        4 * M_FeO - 6 * M_MgO))) + M_O * (M_FeO * (-6 * M_MgO * M_m + M_SiO2 * (-3 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-9 * M_FeO - 3 * M_MgO + 9 * M_m) + M_m * (9 * M_FeO - 6 * M_MgO)))) + M_c * (M_Fe * (
-        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_O * (M_FeO * M_SiO2 * (
-        M_MgO - M_m) + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_Si * (M_Fe * (
-        M_FeSiO3 * (4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-        M_FeO + 2 * M_MgO - 4 * M_m) + M_m * (-M_FeO + 2 * M_MgO)) + M_FeO * (2 * M_MgO * M_m + M_SiO2 * (
-        2 * M_MgO - 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (4 * M_FeO + 2 * M_MgO - 4 * M_m) + M_m * (
-        -4 * M_FeO + 2 * M_MgO)) + M_O * (M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
-        M_SiO2 - M_m))))) + M_Si * dKSiO2_KSiO2 * (M_O * (M_Fe * (
-        M_MgO * (M_FeSiO3 * (4 * M_SiO2 - 10 * M_m) - 6 * M_SiO2 * M_m) + M_MgSiO3 * (
-        M_SiO2 * (2 * M_FeO + 6 * M_MgO - 6 * M_m) + M_m * (4 * M_FeO - 6 * M_MgO))) + M_MgO * (
-                                                          -6 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                          -6 * M_FeO * M_m + M_SiO2 * (
-                                                          6 * M_FeO - 6 * M_m))) + M_MgSiO3 * (M_FeO * (
-        -6 * M_MgO * M_m + M_SiO2 * (6 * M_MgO - 6 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        6 * M_FeO + 6 * M_MgO - 6 * M_m) + M_m * (-6 * M_FeO - 6 * M_MgO)))) + M_c * (M_Fe * (
-        M_MgO * (M_FeSiO3 * (-M_SiO2 + 3 * M_m) + 2 * M_SiO2 * M_m) + M_MgSiO3 * (
-        M_SiO2 * (-M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (-M_FeO + 2 * M_MgO)) + M_O * (
-        M_MgO * (-M_FeSiO3 - M_SiO2) + M_MgSiO3 * (M_FeO - M_m))) + M_MgO * (2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        2 * M_FeO * M_m + M_SiO2 * (-2 * M_FeO + 2 * M_m))) + M_MgSiO3 * (M_FeO * (
-        2 * M_MgO * M_m + M_SiO2 * (-2 * M_MgO + 2 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO))) + M_O * (M_MgO * M_SiO2 * (
-        -M_FeO - M_FeSiO3) + M_MgSiO3 * M_m * (-M_FeO - M_FeSiO3)))) + dKMgO_KMgO * (M_Fe * M_O * (M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                                                                   M_FeO * (
-                                                                                                   4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                   -4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                                                                   M_SiO2 * (
-                                                                                                   -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                                   4 * M_FeO + 4 * M_MgO)))) + M_Si * (
-                                                                                     M_Fe * (M_MgO * (
-                                                                                     M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                     M_FeO * M_m + M_SiO2 * (
-                                                                                     -M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                             M_FeO * (
-                                                                                             M_MgO * M_m + M_SiO2 * (
-                                                                                             -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                             M_SiO2 * (
-                                                                                             -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                             M_FeO + M_MgO))) + M_O * (
-                                                                                             M_MgO * (
-                                                                                             4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                                             -9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                             -M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                             4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                                             -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                                             -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                                             -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_O * (
-                                                                                     M_MgO * (
-                                                                                     9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                     9 * M_FeO * M_m + M_SiO2 * (
-                                                                                     -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                     M_FeO * (
-                                                                                     9 * M_MgO * M_m + M_SiO2 * (
-                                                                                     -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                     M_SiO2 * (
-                                                                                     -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                     9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                                                                                     M_Fe * (M_MgO * (
-                                                                                     -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                     -M_FeO * M_m + M_SiO2 * (
-                                                                                     M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                             M_FeO * (
-                                                                                             -M_MgO * M_m + M_SiO2 * (
-                                                                                             M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                             M_SiO2 * (
-                                                                                             M_FeO + M_MgO - M_m) + M_m * (
-                                                                                             -M_FeO - M_MgO))) + M_O * (
-                                                                                             M_MgO * (M_FeSiO3 * (
-                                                                                             M_FeO - M_m) + M_SiO2 * (
-                                                                                                      M_FeO - M_m)) + M_MgSiO3 * (
-                                                                                             M_FeSiO3 * (
-                                                                                             M_FeO + M_MgO - M_m) + M_MgO * (
-                                                                                             M_FeO - M_m) + M_SiO2 * (
-                                                                                             M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                     M_MgO * (
-                                                                                     -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                     -M_FeO * M_m + M_SiO2 * (
-                                                                                     M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                     M_FeO * (-M_MgO * M_m + M_SiO2 * (
-                                                                                     M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                     M_SiO2 * (
-                                                                                     M_FeO + M_MgO - M_m) + M_m * (
-                                                                                     -M_FeO - M_MgO)))) + M_Si * (
-                                                                                     M_Fe * (M_MgO * (
-                                                                                     -M_FeO * M_m + M_FeSiO3 * (
-                                                                                     4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                     M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                             -M_FeO * M_m + M_FeSiO3 * (
-                                                                                             4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                             4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                             M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                             M_MgO * (
-                                                                                             M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                             M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_MgO * (
-                                                                                     -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                     -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                     4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                     M_FeO * (
-                                                                                     -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                     4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                     M_SiO2 * (
-                                                                                     4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                     -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                     M_MgO * (M_FeO * (
-                                                                                     M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                              M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                     M_FeO * (
-                                                                                     M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                     M_SiO2 - M_m))))))) / (M_O * (
-        M_Fe * (M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-        4 * M_FeO + 4 * M_MgO)) + M_MgO * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (M_FeO * (
-        4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-        M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-        M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-        4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                           4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                           -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                           -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (
-                                                                                        M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                            M_FeO + M_MgO)) + M_MgSiO3 * (
-                                                                                                M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                M_FeO + M_MgO)) + M_O * (
-                                                                                                M_FeSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + 9 * M_m) + M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                                M_FeO + M_MgO)) + M_MgO * (
-                                                                                        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        M_FeO * M_m + M_SiO2 * (
-                                                                                        -M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                        M_FeO + M_MgO))) + M_O * (
-                                                                                        M_FeO * (
-                                                                                        4 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_MgO * (
-                                                                                        -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                        -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
-                                                                                        M_MgO * (
-                                                                                        9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_SiO2 * (
-                                                                                        -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        9 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                        9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                                                                                                            M_Fe * (
-                                                                                                            M_MgO * (
-                                                                                                            -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                            -M_FeO * M_m + M_SiO2 * (
-                                                                                                            M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            -M_MgO * M_m + M_SiO2 * (
-                                                                                                            M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                            M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                            -M_FeO - M_MgO))) + M_O * (
-                                                                                                            M_MgO * (
-                                                                                                            M_FeSiO3 * (
-                                                                                                            M_FeO - M_m) + M_SiO2 * (
-                                                                                                            M_FeO - M_m)) + M_MgSiO3 * (
-                                                                                                            M_FeSiO3 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_MgO * (
-                                                                                                            M_FeO - M_m) + M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                                            M_Fe * (
-                                                                                                            M_FeSiO3 * (
-                                                                                                            M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                            -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                                            M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                            -M_FeO - M_MgO)) + M_O * (
-                                                                                                            M_FeSiO3 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                                            -M_FeO - M_MgO)) + M_MgO * (
-                                                                                                            -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                            -M_FeO * M_m + M_SiO2 * (
-                                                                                                            M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            -M_MgO * M_m + M_SiO2 * (
-                                                                                                            M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                            M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                            -M_FeO - M_MgO))) + M_O * (
-                                                                                                            M_FeO * M_SiO2 * (
-                                                                                                            M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            M_MgO - M_m) + M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                            M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                                            M_MgO * (
-                                                                                                            -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                            -M_FeO * M_m + M_SiO2 * (
-                                                                                                            M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            -M_MgO * M_m + M_SiO2 * (
-                                                                                                            M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                            M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                            -M_FeO - M_MgO)))) + M_Si * (
-                                                                                                            M_Fe * (
-                                                                                                            M_MgO * (
-                                                                                                            -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                            4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                                            M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                            -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                            4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                                            4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                                            M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                                            M_MgO * (
-                                                                                                            M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                            M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                            M_Fe * (
-                                                                                                            M_FeSiO3 * (
-                                                                                                            4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                            4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                            M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                            M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                            -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                            -M_MgO * M_m + M_SiO2 * (
-                                                                                                            M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                            -4 * M_FeO * M_m + M_MgO * (
-                                                                                                            4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                            4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                            4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                            M_FeO * (
-                                                                                                            M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                            M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                            M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                            -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                            -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                            4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                            4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                            M_SiO2 * (
-                                                                                                            4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                            -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                            M_MgO * (
-                                                                                                            M_FeO * (
-                                                                                                            M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                            M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                            M_FeO * (
-                                                                                                            M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                            M_SiO2 - M_m))))))
+                       M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                       M_MgO * (-2.0 * M_SiO2 - 10.0 * M_m) + M_MgSiO3 * (
+                       9.0 * M_FeO + 9.0 * M_MgO + 4.0 * M_SiO2 - 25.0 * M_m))) + M_FeO * M_O * (M_MgO * (
+                       -3.0 * M_SiO2 - 6.0 * M_m) + M_MgSiO3 * (6.0 * M_SiO2 - 15.0 * M_m))) + M_c * (M_Fe * (
+                       M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_O * (
+                       -M_FeO - M_MgO + M_m) + M_SiO2 * M_m)) + M_FeO * M_O * (
+                                                                                                      M_MgO * M_SiO2 + M_MgSiO3 * M_m) + M_Si * (
+                                                                                                      M_Fe * (M_MgO * (
+                                                                                                      M_SiO2 + 3.0 * M_m) + M_MgSiO3 * (
+                                                                                                              -4.0 * M_FeO - 4.0 * M_MgO - M_SiO2 + 9.0 * M_m) + M_O * (
+                                                                                                              -M_MgO - M_MgSiO3)) + M_FeO * (
+                                                                                                      M_MgO * (
+                                                                                                      2.0 * M_SiO2 + 2.0 * M_m) + M_MgSiO3 * (
+                                                                                                      -2.0 * M_SiO2 + 6.0 * M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                       M_Fe * M_O * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                       -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_Si * (M_Fe * (
+                       M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -3.0 * M_SiO2 - 6.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_O * (M_FeO * (
+                       M_MgO * (-3.0 * M_SiO2 - 6.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                       -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                               -3.0 * M_SiO2 - 6.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_c * (
+                       M_Fe * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                       M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+                               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_O * (
+                       M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                       M_FeO * (M_SiO2 - M_m) + M_SiO2 * (M_MgO - M_m))) + M_Si * (M_Fe * (
+                       M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                       2.0 * M_SiO2 + 2.0 * M_m) + M_O * (
+                       M_FeO + M_FeSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (M_MgO * (
+                       2.0 * M_SiO2 + 2.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                       4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (2.0 * M_SiO2 + 2.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                   M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                   M_SiO2 - M_m))))) + M_Si * (M_Fe * (
+        M_FeSiO3 * (M_FeO * (M_SiO2 * (dM_MgO_er + dM_MgSiO3_er) + M_m * (-dM_MgO_er - dM_MgSiO3_er)) + M_MgO * (
+        M_SiO2 * (1.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+        1.0 * dM_FeO_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                    -dM_MgO_er - dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+        M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+        1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er + 1.0 * dM_SiO2_er)) + M_MgO * (
+                                                              M_SiO2 * (-1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er) + M_m * (
+                                                              1.0 * dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                              1.0 * dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_O * (
+        M_FeO * (M_SiO2 * (dM_MgO_er + dM_MgSiO3_er) + M_m * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+        M_FeO * (9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_MgO * (
+        6.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 15.0 * dM_MgO_er + 24.0 * dM_MgSiO3_er + 9.0 * dM_SiO2_er) + M_SiO2 * (
+        4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_m * (-25.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+        2 * dM_FeO_er + 5.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                            4.0 * dM_FeO_er + 10.0 * dM_FeSiO3_er + 6.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_MgSiO3 * (
+        M_FeO * (
+        -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_MgO * (
+        9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+        -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 6.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+        10.0 * dM_FeO_er + 25.0 * dM_FeSiO3_er - 15.0 * dM_MgO_er + 15.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+        -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_SiO2 * M_m * (
+        M_FeO * (-dM_MgO_er - dM_MgSiO3_er) + M_MgO * (1.0 * dM_FeO_er + 1.0 * dM_FeSiO3_er))) + M_O * (M_FeO * (
+        M_MgO * (M_SiO2 * (
+        3.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                 6.0 * dM_FeSiO3_er + 6.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+        -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+        M_MgO * (9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+        9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_m * (-9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+        3.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                          -6.0 * dM_FeO_er + 6.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                              -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                                                                        M_FeO * (
+                                                                                                        M_MgO * (
+                                                                                                        9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                        -6.0 * dM_FeO_er - 12.0 * dM_FeSiO3_er - 6.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+                                                                                                        15.0 * dM_FeSiO3_er - 15.0 * dM_MgO_er + 15.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                        M_FeO * (
+                                                                                                        9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                        9.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                        -6.0 * dM_FeSiO3_er - 6.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_m * (
+                                                                                                        -15.0 * dM_FeO_er - 15.0 * dM_MgO_er + 15.0 * dM_SiO2_er)))) + dKSiO2_KSiO2 * (
+                                                                                                               M_O * (
+                                                                                                               M_Fe * (
+                                                                                                               M_MgO * (
+                                                                                                               M_FeSiO3 * (
+                                                                                                               4.0 * M_SiO2 - 10.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               2.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                                               6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgO * (
+                                                                                                               -6.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               M_MgO * (
+                                                                                                               6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               6.0 * M_SiO2 - 6.0 * M_m) + M_MgO * (
+                                                                                                               6.0 * M_SiO2 - 6.0 * M_m) - 6.0 * M_SiO2 * M_m))) + M_c * (
+                                                                                                               M_Fe * (
+                                                                                                               M_MgO * (
+                                                                                                               M_FeSiO3 * (
+                                                                                                               -M_SiO2 + 3.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               -M_SiO2 - M_m) + M_MgO * (
+                                                                                                               -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                               M_MgO * (
+                                                                                                               -M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
+                                                                                                               M_FeO - M_m))) + M_MgO * (
+                                                                                                               2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               M_MgO * (
+                                                                                                               -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                                               -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                                               M_MgO * M_SiO2 * (
+                                                                                                               -M_FeO - M_FeSiO3) + M_MgSiO3 * M_m * (
+                                                                                                               -M_FeO - M_FeSiO3))))) + M_c * (
+                       M_Fe * (M_FeSiO3 * (
+                       M_FeO * (M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_MgO * (
+                       M_SiO2 * (-dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                       -dM_FeO_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                       dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                       M_SiO2 * (dM_FeO_er + 2.0 * dM_FeSiO3_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_m * (
+                       -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er)) + M_MgO * (
+                                                                M_SiO2 * (dM_FeO_er + 1.0 * dM_FeSiO3_er) + M_m * (
+                                                                -dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                -dM_FeO_er - 1.0 * dM_FeSiO3_er)) + M_O * (M_FeSiO3 * (
+                       M_FeO * (-dM_MgO_er - dM_MgSiO3_er) + M_MgO * (
+                       -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                       dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (
+                       dM_FeSiO3_er - dM_MgO_er + dM_SiO2_er) + M_MgO * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er)) + M_SiO2 * (
+                                                                                                           M_FeO * (
+                                                                                                           -dM_MgO_er - dM_MgSiO3_er) + M_MgO * (
+                                                                                                           -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                           dM_MgO_er + dM_MgSiO3_er))) + M_SiO2 * M_m * (
+                               M_FeO * (dM_MgO_er + dM_MgSiO3_er) + M_MgO * (
+                               -dM_FeO_er - 1.0 * dM_FeSiO3_er))) + M_O * (M_FeO * M_SiO2 * (
+                       M_MgO * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                       dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (
+                       M_MgO * (-dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                       -dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_SiO2 * (M_MgO * (
+                       -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                  dM_MgO_er + dM_MgSiO3_er))) + M_MgSiO3 * (
+                                                                           M_FeO * (M_MgO * (
+                                                                           -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                                    -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er)) + M_FeSiO3 * (
+                                                                           M_FeO * (
+                                                                           -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_MgO * (
+                                                                           -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_m * (
+                                                                           dM_FeO_er + dM_MgO_er - dM_SiO2_er)))) + M_Si * (
+                       M_Fe * (
+                       M_FeO * (M_SiO2 * (-dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (
+                       M_FeO * (-4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                       -2.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_SiO2 * (
+                       -dM_MgO_er - dM_MgSiO3_er) + M_m * (9.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er)) + M_MgO * (M_SiO2 * (
+                       -dM_FeO_er - 3.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                             -dM_FeO_er - 3.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                       M_FeO * (
+                       2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_MgO * (
+                       -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                       dM_FeO_er + 3.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                       -3.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er - 6.0 * dM_SiO2_er)) + M_O * (
+                       M_FeO * (-dM_MgO_er - dM_MgSiO3_er) + M_FeSiO3 * (-dM_MgO_er - dM_MgSiO3_er) + M_MgO * (
+                       -dM_MgO_er - dM_MgSiO3_er) + M_MgSiO3 * (-dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                       -dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_SiO2 * M_m * (
+                       4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_FeO * (M_MgO * (M_SiO2 * (
+                       -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                  -2.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                         4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+                       M_FeO * (M_MgO * (
+                       -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                -4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_m * (
+                                4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_MgO * (
+                       M_SiO2 * (-2.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                       2.0 * dM_FeO_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                       4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er)) + M_MgSiO3 * (M_FeO * (M_MgO * (
+                       -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                     2 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                     -6.0 * dM_FeSiO3_er + 6.0 * dM_MgO_er - 6.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                            M_FeO * (
+                                                                            -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                            -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                            2.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                            6.0 * dM_FeO_er + 6.0 * dM_MgO_er - 6.0 * dM_SiO2_er))) + M_O * (
+                       M_FeO * (M_MgO * (-dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                       -dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_FeSiO3 * (
+                       M_MgO * (-dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_SiO2 * (
+                       -dM_MgO_er - dM_MgSiO3_er) + M_m * (dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (
+                       M_FeO * (-dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er) + M_FeSiO3 * (
+                       -dM_FeO_er - dM_FeSiO3_er - dM_MgO_er - dM_MgSiO3_er))))) + dKMgO_KMgO * (M_Fe * M_O * (M_MgO * (
+        4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+        M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+        -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Si * (M_Fe * (
+        M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+        M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+        M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+        M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+        -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+        -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                      -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                      -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_O * (
+                                                                                                           M_MgO * (
+                                                                                                           9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           M_MgO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                           M_FeO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+                                                                                                           -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+                                                                                                 M_Fe * (M_MgO * (
+                                                                                                 -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                         M_FeO * (
+                                                                                                         M_MgO * (
+                                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                         M_FeO * (
+                                                                                                         M_SiO2 - M_m) + M_MgO * (
+                                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                                                                         M_MgO * (
+                                                                                                         M_FeSiO3 * (
+                                                                                                         M_FeO - M_m) + M_SiO2 * (
+                                                                                                         M_FeO - M_m)) + M_MgSiO3 * (
+                                                                                                         M_FeO * (
+                                                                                                         M_MgO + M_SiO2) + M_FeSiO3 * (
+                                                                                                         M_FeO + M_MgO - M_m) + M_MgO * (
+                                                                                                         M_SiO2 - M_m) - M_SiO2 * M_m))) + M_O * (
+                                                                                                 M_MgO * (
+                                                                                                 -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (M_MgO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 M_SiO2 - M_m) + M_MgO * (
+                                                                                                 M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (
+                                                                                                 M_Fe * (M_MgO * (
+                                                                                                 M_FeO * (
+                                                                                                 M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                 4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                         M_FeO * (
+                                                                                                         4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                         4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                         4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                         M_MgO * (
+                                                                                                         M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                         M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_MgO * (
+                                                                                                 -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (M_MgO * (
+                                                                                                 4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                                 4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                                 M_MgO * (M_FeO * (
+                                                                                                 M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                          M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                 M_SiO2 - M_m))))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
 
-    def dM_O_dTc(self, Moles, dKs):
+    def dM_m_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
+        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
+        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
+        return M_m * (M_Fe * (M_O * (M_MgO * (M_FeO * M_SiO2 * (
+        -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                              M_FeO * (
+                                              -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                              -4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                     M_FeO * (M_MgO * (
+                                     -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                              -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                     M_FeO * (
+                                     -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                     -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                     -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)))) + dKFeO_KFeO * (
+                              M_Mg * M_O * M_SiO2 * (-4.0 * M_FeO * M_MgSiO3 + 4.0 * M_FeSiO3 * M_MgO) + M_Si * (
+                              M_Mg * (M_O * (M_FeO * (-15.0 * M_MgSiO3 - 3.0 * M_SiO2) + M_FeSiO3 * (
+                              -9.0 * M_FeO + 6.0 * M_MgO + 6.0 * M_SiO2)) + M_SiO2 * (
+                                      -M_FeO * M_MgSiO3 + M_FeSiO3 * M_MgO)) + M_O * (
+                              M_MgO * (-3.0 * M_FeO * M_SiO2 + M_FeSiO3 * (-9.0 * M_FeO + 6.0 * M_SiO2)) + M_MgSiO3 * (
+                              M_FeO * (-9.0 * M_MgO - 3.0 * M_SiO2) + M_FeSiO3 * (
+                              -9.0 * M_FeO - 9.0 * M_MgO + 6.0 * M_SiO2)))) + M_c * (M_Mg * (M_FeO * (
+                              M_MgSiO3 * M_SiO2 + M_O * (
+                              M_FeSiO3 + M_MgSiO3 + M_SiO2)) - M_FeSiO3 * M_MgO * M_SiO2) + M_O * (M_FeO * M_MgO * (
+                              M_FeSiO3 + M_SiO2) + M_MgSiO3 * (M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (
+                              M_FeO + M_MgO))) + M_Si * (M_Mg * (M_FeO * (6.0 * M_MgSiO3 + 2.0 * M_SiO2) + M_FeSiO3 * (
+                              4.0 * M_FeO - 2.0 * M_MgO - 2.0 * M_SiO2) + M_O * (M_FeO + M_FeSiO3)) + M_MgO * (
+                                                         2.0 * M_FeO * M_SiO2 + M_FeSiO3 * (
+                                                         4.0 * M_FeO - 2.0 * M_SiO2)) + M_MgSiO3 * (
+                                                         M_FeO * (4.0 * M_MgO + 2.0 * M_SiO2) + M_FeSiO3 * (
+                                                         4.0 * M_FeO + 4.0 * M_MgO - 2.0 * M_SiO2)) + M_O * (
+                                                         M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
+                                                         M_FeO + M_FeSiO3)))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                      M_O * M_SiO2 * (M_Fe * M_FeO * (4.0 * M_MgO + 4.0 * M_MgSiO3) + M_Mg * (
+                      M_Fe * (4.0 * M_FeO + 4.0 * M_MgO) + M_FeO * (4.0 * M_MgO + 4.0 * M_MgSiO3))) + M_Si * (M_Fe * (
+                      M_FeO * M_SiO2 * (M_MgO + M_MgSiO3) + M_O * (M_MgO * (6.0 * M_FeO + 6.0 * M_SiO2) + M_MgSiO3 * (
+                      6.0 * M_FeO - 9.0 * M_MgO + 6.0 * M_SiO2))) + M_FeO * M_O * M_SiO2 * (
+                                                                                                              9.0 * M_MgO + 9.0 * M_MgSiO3) + M_Mg * (
+                                                                                                              M_Fe * (
+                                                                                                              M_O * (
+                                                                                                              6.0 * M_FeO + 6.0 * M_MgO + 6.0 * M_SiO2) + M_SiO2 * (
+                                                                                                              M_FeO + M_MgO)) + M_FeO * (
+                                                                                                              M_O * (
+                                                                                                              6.0 * M_MgO + 15.0 * M_MgSiO3 + 9.0 * M_SiO2) + M_SiO2 * (
+                                                                                                              M_MgO + M_MgSiO3)))) + M_c * (
+                      M_Fe * (
+                      -M_FeO * M_MgO * M_SiO2 + M_MgSiO3 * (-M_FeO * M_SiO2 + M_MgO * M_O)) + M_FeO * M_O * M_SiO2 * (
+                      -M_MgO - M_MgSiO3) + M_Mg * (M_Fe * M_SiO2 * (-M_FeO - M_MgO) + M_FeO * (
+                      M_O * (-M_MgSiO3 - M_SiO2) + M_SiO2 * (-M_MgO - M_MgSiO3))) + M_Si * (M_Fe * (
+                      M_MgO * (-2.0 * M_FeO - 2.0 * M_SiO2) + M_MgSiO3 * (
+                      -2.0 * M_FeO + 4.0 * M_MgO - 2.0 * M_SiO2) + M_O * (M_MgO + M_MgSiO3)) + M_FeO * M_SiO2 * (
+                                                                                            -4.0 * M_MgO - 4.0 * M_MgSiO3) + M_Mg * (
+                                                                                            M_Fe * (
+                                                                                            -2.0 * M_FeO - 2.0 * M_MgO + M_O - 2.0 * M_SiO2) + M_FeO * (
+                                                                                            -2.0 * M_MgO - 6.0 * M_MgSiO3 - 4.0 * M_SiO2))))) + M_Mg * (
+                      M_O * (M_Fe * (M_FeSiO3 * (
+                      M_FeO * (-4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                      -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                      -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_MgSiO3 * (M_FeO * (
+                      -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                  -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_SiO2 * (
+                                     M_FeO * (
+                                     -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_MgO * (
+                                     -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er))) + M_MgO * (
+                             M_FeO * M_SiO2 * (
+                             -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er) + M_FeSiO3 * (
+                             M_FeO * (
+                             -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                             -4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                             M_FeO * (M_MgO * (
+                             -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                      -4.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                             M_FeO * (
+                             -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_MgO * (
+                             -4.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                             -4.0 * dM_FeSiO3_er - 4.0 * dM_MgSiO3_er - 4.0 * dM_SiO2_er)))) + dKMgO_KMgO * (
+                      M_Fe * M_O * M_SiO2 * (4.0 * M_FeO * M_MgSiO3 - 4.0 * M_FeSiO3 * M_MgO) + M_Si * (M_Fe * (M_O * (
+                      M_MgO * (-15.0 * M_FeSiO3 - 3.0 * M_SiO2) + M_MgSiO3 * (
+                      6.0 * M_FeO - 9.0 * M_MgO + 6.0 * M_SiO2)) + M_SiO2 * (
+                                                                                                                M_FeO * M_MgSiO3 - M_FeSiO3 * M_MgO)) + M_O * (
+                                                                                                        M_MgO * (
+                                                                                                        -3.0 * M_FeO * M_SiO2 + M_FeSiO3 * (
+                                                                                                        -9.0 * M_FeO - 3.0 * M_SiO2)) + M_MgSiO3 * (
+                                                                                                        M_FeO * (
+                                                                                                        -9.0 * M_MgO + 6.0 * M_SiO2) + M_FeSiO3 * (
+                                                                                                        -9.0 * M_FeO - 9.0 * M_MgO + 6.0 * M_SiO2)))) + M_c * (
+                      M_Fe * (-M_FeO * M_MgSiO3 * M_SiO2 + M_MgO * (
+                      M_FeSiO3 * M_SiO2 + M_O * (M_FeSiO3 + M_MgSiO3 + M_SiO2))) + M_O * (
+                      M_MgO * (M_FeO * M_SiO2 + M_FeSiO3 * (M_FeO + M_SiO2)) + M_MgSiO3 * (
+                      M_FeO * M_MgO + M_FeSiO3 * (M_FeO + M_MgO))) + M_Si * (M_Fe * (
+                      M_MgO * (6.0 * M_FeSiO3 + 2.0 * M_SiO2) + M_MgSiO3 * (
+                      -2.0 * M_FeO + 4.0 * M_MgO - 2.0 * M_SiO2) + M_O * (M_MgO + M_MgSiO3)) + M_MgO * (
+                                                                             2.0 * M_FeO * M_SiO2 + M_FeSiO3 * (
+                                                                             4.0 * M_FeO + 2.0 * M_SiO2)) + M_MgSiO3 * (
+                                                                             M_FeO * (
+                                                                             4.0 * M_MgO - 2.0 * M_SiO2) + M_FeSiO3 * (
+                                                                             4.0 * M_FeO + 4.0 * M_MgO - 2.0 * M_SiO2)) + M_O * (
+                                                                             M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
+                                                                             M_FeO + M_FeSiO3)))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                      M_O * M_SiO2 * (M_Fe * M_MgO * (4.0 * M_FeO + 4.0 * M_FeSiO3) + M_Mg * (
+                      M_Fe * (4.0 * M_FeO + 4.0 * M_MgO) + M_MgO * (4.0 * M_FeO + 4.0 * M_FeSiO3))) + M_Si * (M_Mg * (
+                      M_Fe * (
+                      M_O * (6.0 * M_FeO + 6.0 * M_MgO + 6.0 * M_SiO2) + M_SiO2 * (M_FeO + M_MgO)) + M_MgO * M_SiO2 * (
+                      M_FeO + M_FeSiO3) + M_O * (M_FeO * (6.0 * M_MgO + 6.0 * M_SiO2) + M_FeSiO3 * (
+                      -9.0 * M_FeO + 6.0 * M_MgO + 6.0 * M_SiO2))) + M_MgO * (M_Fe * (
+                      M_O * (6.0 * M_FeO + 15.0 * M_FeSiO3 + 9.0 * M_SiO2) + M_SiO2 * (
+                      M_FeO + M_FeSiO3)) + M_O * M_SiO2 * (9.0 * M_FeO + 9.0 * M_FeSiO3))) + M_c * (M_Mg * (
+                      M_FeSiO3 * (M_FeO * M_O - M_MgO * M_SiO2) + M_SiO2 * (
+                      M_Fe * (-M_FeO - M_MgO) - M_FeO * M_MgO)) + M_MgO * (M_Fe * (
+                      M_O * (-M_FeSiO3 - M_SiO2) + M_SiO2 * (-M_FeO - M_FeSiO3)) + M_O * M_SiO2 * (
+                                                                           -M_FeO - M_FeSiO3)) + M_Si * (M_Mg * (
+                      M_Fe * (-2.0 * M_FeO - 2.0 * M_MgO + M_O - 2.0 * M_SiO2) + M_FeO * (
+                      -2.0 * M_MgO - 2.0 * M_SiO2) + M_FeSiO3 * (4.0 * M_FeO - 2.0 * M_MgO - 2.0 * M_SiO2) + M_O * (
+                      M_FeO + M_FeSiO3)) + M_MgO * (M_Fe * (-2.0 * M_FeO - 6.0 * M_FeSiO3 - 4.0 * M_SiO2) + M_SiO2 * (
+                      -4.0 * M_FeO - 4.0 * M_FeSiO3))))) + M_Si * (M_Fe * (M_MgO * (
+        M_FeO * M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_FeSiO3 * (
+        M_FeO * (-1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+        -1.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er))) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+        -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                  -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                  -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er))) + M_O * (
+                                                                           M_MgO * (M_FeO * (
+                                                                           -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                    -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 25.0 * dM_MgO_er - 40.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                    -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 18.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                           M_FeO * (
+                                                                           -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                           -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er) + M_MgO * (
+                                                                           -9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                           -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)))) + M_Mg * (
+                                                                   M_Fe * (M_FeSiO3 * (M_FeO * (
+                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                       -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                       -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                           M_FeO * (
+                                                                           -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                           -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                           -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_O * (
+                                                                           M_FeO * (
+                                                                           -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                           -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er) + M_MgO * (
+                                                                           -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                           -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                           -6.0 * dM_FeO_er - 15.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_SiO2 * (
+                                                                           M_FeO * (
+                                                                           -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_MgO * (
+                                                                           -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er))) + M_MgO * (
+                                                                   M_FeO * M_SiO2 * (
+                                                                   -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_FeSiO3 * (
+                                                                   M_FeO * (
+                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                   -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er))) + M_MgSiO3 * (
+                                                                   M_FeO * (M_MgO * (
+                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                            -dM_FeO_er - 2.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                   M_FeO * (
+                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                   -1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                   -1.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er))) + M_O * (
+                                                                   M_FeO * (M_MgO * (
+                                                                   -4.0 * dM_FeO_er - 10.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                            -9.0 * dM_FeO_er - 18.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                   M_FeO * (
+                                                                   -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er) + M_MgO * (
+                                                                   2.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 4.0 * dM_MgO_er - 10.0 * dM_MgSiO3_er - 6.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                   -9.0 * dM_FeSiO3_er - 6.0 * dM_MgO_er - 15.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                   M_FeO * (
+                                                                   -25.0 * dM_FeO_er - 40.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                   -10.0 * dM_FeO_er - 25.0 * dM_FeSiO3_er - 10.0 * dM_MgO_er - 25.0 * dM_MgSiO3_er - 15.0 * dM_SiO2_er)))) + M_O * (
+                                                                   M_MgO * (M_FeO * M_SiO2 * (
+                                                                   -9.0 * dM_FeO_er - 18.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 18.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                            M_FeO * (
+                                                                            -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                            -9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 18.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                                                   M_FeO * (M_MgO * (
+                                                                   -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                            -9.0 * dM_FeO_er - 18.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                   M_FeO * (
+                                                                   -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                   -9.0 * dM_FeO_er - 9.0 * dM_FeSiO3_er - 9.0 * dM_MgO_er - 9.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                   -9.0 * dM_FeSiO3_er - 9.0 * dM_MgSiO3_er - 9.0 * dM_SiO2_er)))) + dKSiO2_KSiO2 * (
+                                                                   M_O * (M_Fe * (M_MgO * (
+                                                                   2.0 * M_FeO * M_SiO2 + M_FeSiO3 * (
+                                                                   6.0 * M_FeO - 4.0 * M_SiO2)) + M_MgSiO3 * (M_FeO * (
+                                                                   6.0 * M_MgO + 2.0 * M_SiO2) + M_FeSiO3 * (
+                                                                                                              6.0 * M_FeO + 6.0 * M_MgO - 4.0 * M_SiO2))) + M_Mg * (
+                                                                          M_Fe * (M_FeSiO3 * (
+                                                                          6.0 * M_FeO + 6.0 * M_MgO - 4.0 * M_SiO2) + M_MgSiO3 * (
+                                                                                  6.0 * M_FeO + 6.0 * M_MgO - 4.0 * M_SiO2) + M_SiO2 * (
+                                                                                  2.0 * M_FeO + 2.0 * M_MgO)) + M_MgO * (
+                                                                          2.0 * M_FeO * M_SiO2 + M_FeSiO3 * (
+                                                                          6.0 * M_FeO + 2.0 * M_SiO2)) + M_MgSiO3 * (
+                                                                          M_FeO * (
+                                                                          6.0 * M_MgO - 4.0 * M_SiO2) + M_FeSiO3 * (
+                                                                          6.0 * M_FeO + 6.0 * M_MgO - 4.0 * M_SiO2)))) + M_c * (
+                                                                   M_Fe * (M_MgO * (-M_FeO * M_SiO2 + M_FeSiO3 * (
+                                                                   -2.0 * M_FeO + M_SiO2)) + M_MgSiO3 * (M_FeO * (
+                                                                   -2.0 * M_MgO - M_SiO2) + M_FeSiO3 * (
+                                                                                                         -2.0 * M_FeO - 2.0 * M_MgO + M_SiO2)) + M_O * (
+                                                                           M_MgO * (M_FeSiO3 + M_SiO2) + M_MgSiO3 * (
+                                                                           M_FeSiO3 + M_SiO2))) + M_Mg * (M_Fe * (
+                                                                   M_FeSiO3 * (
+                                                                   -2.0 * M_FeO - 2.0 * M_MgO + M_SiO2) + M_MgSiO3 * (
+                                                                   -2.0 * M_FeO - 2.0 * M_MgO + M_SiO2) + M_O * (
+                                                                   M_FeSiO3 + M_MgSiO3 + M_SiO2) + M_SiO2 * (
+                                                                   -M_FeO - M_MgO)) + M_MgO * (
+                                                                                                          -M_FeO * M_SiO2 + M_FeSiO3 * (
+                                                                                                          -2.0 * M_FeO - M_SiO2)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          -2.0 * M_MgO + M_SiO2) + M_FeSiO3 * (
+                                                                                                          -2.0 * M_FeO - 2.0 * M_MgO + M_SiO2)) + M_O * (
+                                                                                                          M_MgSiO3 * (
+                                                                                                          M_FeO + M_FeSiO3) + M_SiO2 * (
+                                                                                                          M_FeO + M_FeSiO3))) + M_O * M_SiO2 * (
+                                                                   M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
+                                                                   M_FeO + M_FeSiO3))))) + M_c * (M_Fe * (M_MgO * (
+        M_FeO * M_SiO2 * (
+        dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_FeSiO3 * (
+        M_FeO * (dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+        dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er))) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+        dM_FeO_er + 2.0 * dM_FeSiO3_er + 1.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                               dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er))) + M_O * (
+                                                                                                          M_MgO * (
+                                                                                                          M_FeSiO3 * (
+                                                                                                          dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_SiO2 * (
+                                                                                                          dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                          M_FeSiO3 * (
+                                                                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_MgO * (
+                                                                                                          dM_MgO_er + dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)))) + M_Mg * (
+                                                                                                  M_Fe * (M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                  dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                          dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_O * (
+                                                                                                          M_FeSiO3 * (
+                                                                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_MgSiO3 * (
+                                                                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_SiO2 * (
+                                                                                                          dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_SiO2 * (
+                                                                                                          M_FeO * (
+                                                                                                          dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                          dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er))) + M_MgO * (
+                                                                                                  M_FeO * M_SiO2 * (
+                                                                                                  dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  1.0 * dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + 1.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                                                                                  M_FeO * (M_MgO * (
+                                                                                                  dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                           dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                  dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er))) + M_O * (
+                                                                                                  M_FeO * M_SiO2 * (
+                                                                                                  dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er) + M_SiO2 * (
+                                                                                                  dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)))) + M_O * (
+                                                                                                  M_MgO * (
+                                                                                                  M_FeO * M_SiO2 * (
+                                                                                                  dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  dM_FeSiO3_er + dM_MgO_er + 2 * dM_MgSiO3_er + dM_SiO2_er))) + M_MgSiO3 * (
+                                                                                                  M_FeO * (M_MgO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                           dM_FeO_er + 2 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_MgO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er)))) + M_Si * (
+                                                                                                  M_Fe * (M_MgO * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 9.0 * dM_MgO_er + 15.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                  2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          dM_FeO_er + 3.0 * dM_FeSiO3_er - 1.0 * dM_MgO_er + 1.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                          3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                          4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_O * (
+                                                                                                          M_MgO * (
+                                                                                                          dM_MgO_er + dM_MgSiO3_er) + M_MgSiO3 * (
+                                                                                                          dM_MgO_er + dM_MgSiO3_er))) + M_Mg * (
+                                                                                                  M_Fe * (M_FeO * (
+                                                                                                  dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                          3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                          dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                                                          3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                          2.0 * dM_FeO_er + 6.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_FeO * (
+                                                                                                  M_MgO * (
+                                                                                                  dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                  4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er) + M_MgO * (
+                                                                                                  -1.0 * dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                  4.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 6.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  9.0 * dM_FeO_er + 15.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  3.0 * dM_FeO_er + 9.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 9.0 * dM_MgSiO3_er + 6.0 * dM_SiO2_er)) + M_O * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er) + M_FeSiO3 * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er))) + M_MgO * (
+                                                                                                  M_FeO * M_SiO2 * (
+                                                                                                  4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 8.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                                                                                  M_FeO * (M_MgO * (
+                                                                                                  4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                           4.0 * dM_FeO_er + 8.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                  4.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 4.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  4.0 * dM_FeSiO3_er + 4.0 * dM_MgSiO3_er + 4.0 * dM_SiO2_er))) + M_O * (
+                                                                                                  M_MgO * (M_FeO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                                                           dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                                                                  M_FeO * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er) + M_FeSiO3 * (
+                                                                                                  dM_FeO_er + dM_FeSiO3_er + dM_MgO_er + dM_MgSiO3_er)))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
+
+    def dM_c_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
+        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
+        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
+        return M_c * (M_Fe * (M_O * (M_MgO * (M_FeSiO3 * (
+        M_FeO * (-2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+        2.0 * dM_FeO_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_SiO2 * (M_FeO * (
+        -2.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                              2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er))) + M_MgSiO3 * (
+                                     M_FeO * (M_MgO * (
+                                     -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                              -2.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                     M_FeO * (
+                                     -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                     -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+                                     2.0 * dM_FeO_er + 2.0 * dM_MgO_er - 2.0 * dM_SiO2_er)) + M_MgO * (
+                                     M_SiO2 * (-2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er) + M_m * (
+                                     2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                     2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er))) + dKFeO_KFeO * (M_O * (M_Mg * (
+        M_FeO * M_m * (-2.0 * M_MgSiO3 - 2.0 * M_SiO2) + M_FeSiO3 * (
+        M_FeO * (2.0 * M_SiO2 - 2.0 * M_m) + M_SiO2 * (2.0 * M_MgO - 2.0 * M_m))) + M_MgO * (
+                                                                                                    -2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                    M_FeO * (
+                                                                                                    2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                    M_FeO * (M_MgO * (
+                                                                                                    2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                    M_FeO * (
+                                                                                                    2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (
+                                                                                                    2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m))) + M_Si * (
+                                                                                             M_Mg * (M_FeO * (
+                                                                                             M_MgSiO3 * (
+                                                                                             M_SiO2 - 3.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                     M_FeO * (
+                                                                                                     2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (
+                                                                                                     M_SiO2 + M_m) - 2.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                     M_FeO * (
+                                                                                                     -3.0 * M_MgSiO3 - M_SiO2 - 2.0 * M_m) + M_FeSiO3 * (
+                                                                                                     3.0 * M_MgO + 2.0 * M_SiO2 - 5.0 * M_m))) + M_MgO * (
+                                                                                             -2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                             M_FeO * (
+                                                                                             2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                             M_FeO * (M_MgO * (
+                                                                                             2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                             M_FeO * (
+                                                                                             2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (
+                                                                                             2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                             M_MgO * (M_FeO * (
+                                                                                             -M_SiO2 - 2.0 * M_m) + M_FeSiO3 * (
+                                                                                                      2.0 * M_SiO2 - 5.0 * M_m)) + M_MgSiO3 * (
+                                                                                             M_FeO * (
+                                                                                             -M_SiO2 - 2.0 * M_m) + M_FeSiO3 * (
+                                                                                             2.0 * M_SiO2 - 5.0 * M_m)))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                      M_O * (M_Fe * (M_MgO * M_SiO2 * (2.0 * M_FeO - 2.0 * M_m) + M_MgSiO3 * (
+                      M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) + M_SiO2 * (2.0 * M_FeO - 2.0 * M_m))) + M_Mg * (
+                             M_Fe * M_SiO2 * (2.0 * M_FeO + 2.0 * M_MgO - 2.0 * M_m) + M_FeO * (
+                             2.0 * M_MgO * M_SiO2 + 2.0 * M_MgSiO3 * M_m))) + M_Si * (M_Fe * (
+                      M_MgO * (M_FeO * (M_SiO2 + M_m) - 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                      M_FeO * (M_SiO2 + M_m) + M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_O * (
+                      M_MgO * (3.0 * M_FeO + 2.0 * M_SiO2 - 5.0 * M_m) + M_MgSiO3 * (
+                      3.0 * M_FeO + 2.0 * M_SiO2 - 5.0 * M_m))) + M_FeO * M_O * (M_MgO * (
+                      3.0 * M_SiO2 - 3.0 * M_m) + M_MgSiO3 * (3.0 * M_SiO2 - 3.0 * M_m)) + M_Mg * (M_Fe * (
+                      M_FeO * (M_SiO2 + M_m) + M_MgO * (M_SiO2 + M_m) + M_O * (
+                      3.0 * M_FeO + 3.0 * M_MgO + 2.0 * M_SiO2 - 5.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeO * (M_MgO * (
+                      M_SiO2 + M_m) + M_MgSiO3 * (-M_SiO2 + 3.0 * M_m) + M_O * (
+                                                                                                             3.0 * M_MgO + 3.0 * M_MgSiO3 + 3.0 * M_SiO2 - 3.0 * M_m))))) + M_Mg * (
+                      M_O * (M_Fe * (M_FeSiO3 * (
+                      M_FeO * (-2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                      -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+                      2.0 * dM_FeO_er + 2.0 * dM_MgO_er - 2.0 * dM_SiO2_er)) + M_MgSiO3 * (M_FeO * (
+                      -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                           -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+                                                                                           2.0 * dM_FeO_er + 2.0 * dM_MgO_er - 2.0 * dM_SiO2_er)) + M_SiO2 * (
+                                     M_FeO * (
+                                     -2.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_MgO * (
+                                     -2.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                     2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er))) + M_FeO * M_SiO2 * (
+                             M_MgO * (
+                             -2.0 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                             2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (M_MgO * (
+                      -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                           -2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+                                                                                           2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er)) + M_SiO2 * (
+                                                                                  M_MgO * (
+                                                                                  -2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                  2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er))) + M_MgSiO3 * (
+                             M_FeO * (M_MgO * (
+                             -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+                                      -2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+                             -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                               -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                               2.0 * dM_FeO_er + 2.0 * dM_MgO_er - 2.0 * dM_SiO2_er)))) + dKMgO_KMgO * (
+                      M_O * (M_Fe * (M_MgO * M_m * (-2.0 * M_FeSiO3 - 2.0 * M_SiO2) + M_MgSiO3 * (
+                      M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) + M_SiO2 * (2.0 * M_FeO - 2.0 * M_m))) + M_MgO * (
+                             -2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                             M_FeO * (2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                             M_FeO * (M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                             M_FeO * (2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (
+                             2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m))) + M_Si * (M_Fe * (
+                      M_MgO * (M_FeSiO3 * (M_SiO2 - 3.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                      M_FeO * (M_SiO2 + M_m) + M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_O * (
+                      M_MgO * (-3.0 * M_FeSiO3 - M_SiO2 - 2.0 * M_m) + M_MgSiO3 * (
+                      3.0 * M_FeO + 2.0 * M_SiO2 - 5.0 * M_m))) + M_MgO * (-2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                      M_FeO * (2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+                      M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                      2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                         M_MgO * (M_FeO * (
+                                                                                         -M_SiO2 - 2.0 * M_m) + M_FeSiO3 * (
+                                                                                                  -M_SiO2 - 2.0 * M_m)) + M_MgSiO3 * (
+                                                                                         M_FeO * (
+                                                                                         2.0 * M_SiO2 - 5.0 * M_m) + M_FeSiO3 * (
+                                                                                         2.0 * M_SiO2 - 5.0 * M_m)))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+                      M_O * (M_Fe * M_MgO * (2.0 * M_FeO * M_SiO2 + 2.0 * M_FeSiO3 * M_m) + M_Mg * (
+                      M_FeSiO3 * (M_FeO * (2.0 * M_SiO2 - 2.0 * M_m) + M_SiO2 * (2.0 * M_MgO - 2.0 * M_m)) + M_SiO2 * (
+                      M_Fe * (2.0 * M_FeO + 2.0 * M_MgO - 2.0 * M_m) + M_FeO * (2.0 * M_MgO - 2.0 * M_m)))) + M_Si * (
+                      M_Mg * (M_Fe * (M_FeO * (M_SiO2 + M_m) + M_MgO * (M_SiO2 + M_m) + M_O * (
+                      3.0 * M_FeO + 3.0 * M_MgO + 2.0 * M_SiO2 - 5.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeO * (
+                              M_MgO * (M_SiO2 + M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (
+                              M_SiO2 + M_m) - 2.0 * M_SiO2 * M_m) + M_O * (
+                              M_FeO * (3.0 * M_MgO + 2.0 * M_SiO2 - 5.0 * M_m) + M_FeSiO3 * (
+                              3.0 * M_MgO + 2.0 * M_SiO2 - 5.0 * M_m))) + M_MgO * (M_Fe * (
+                      M_FeO * (M_SiO2 + M_m) + M_FeSiO3 * (-M_SiO2 + 3.0 * M_m) + M_O * (
+                      3.0 * M_FeO + 3.0 * M_FeSiO3 + 3.0 * M_SiO2 - 3.0 * M_m)) + M_O * (M_FeO * (
+                      3.0 * M_SiO2 - 3.0 * M_m) + M_FeSiO3 * (3.0 * M_SiO2 - 3.0 * M_m))))) + M_Si * (M_Fe * (M_MgO * (
+        M_FeO * (M_SiO2 * (-dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+        -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er)) + M_FeSiO3 * (
+        M_FeO * (-2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+        dM_FeSiO3_er + dM_MgO_er + 2.0 * dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+        3.0 * dM_FeO_er - 3.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+        2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (
+        M_MgO * (-2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+        -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+        -dM_FeSiO3_er + dM_MgO_er - dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+        -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                               -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                               dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                               3.0 * dM_FeO_er + 3.0 * dM_MgO_er - 3.0 * dM_SiO2_er)) + M_MgO * (
+                                                             M_SiO2 * (-2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er) + M_m * (
+                                                             2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                             2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er)) + M_O * (M_MgO * (
+        M_FeO * (
+        -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_FeSiO3 * (
+        -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 5.0 * dM_MgO_er - 8.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_SiO2 * (
+        -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+        2.0 * dM_FeO_er + 5.0 * dM_FeSiO3_er + 3.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er)) + M_MgSiO3 * (M_FeO * (
+        -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er + dM_MgO_er - 2.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                     -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                     -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 3.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                     2.0 * dM_FeO_er + 5.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er)))) + M_Mg * (
+                                                                                                      M_Fe * (M_FeO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                      -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                              -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                              dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                              3.0 * dM_FeO_er + 3.0 * dM_MgO_er - 3.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                                              M_SiO2 * (
+                                                                                                              -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                              -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                              -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                              dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                              3.0 * dM_FeO_er + 3.0 * dM_MgO_er - 3.0 * dM_SiO2_er)) + M_O * (
+                                                                                                              M_FeO * (
+                                                                                                              -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                              -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_MgO * (
+                                                                                                              -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_MgSiO3 * (
+                                                                                                              -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                              -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                              2.0 * dM_FeO_er + 5.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                              2.0 * dM_FeO_er + 2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er)) + M_FeO * (
+                                                                                                      M_MgO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                      -dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                      2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                                                      M_FeO * (M_MgO * (
+                                                                                                      -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                               -2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_m * (
+                                                                                                               2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er)) + M_MgO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                      dM_FeO_er - dM_MgSiO3_er - dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                                                      2.0 * dM_MgO_er + 2.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                                                                                                      M_FeO * (M_MgO * (
+                                                                                                      -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                               dM_FeO_er + 2.0 * dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                               -3.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er - 3.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                      -2.0 * dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 2.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                      dM_FeSiO3_er + dM_MgSiO3_er + dM_SiO2_er) + M_m * (
+                                                                                                      3.0 * dM_FeO_er + 3.0 * dM_MgO_er - 3.0 * dM_SiO2_er))) + M_O * (
+                                                                                                      M_FeO * (M_MgO * (
+                                                                                                      -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                               -3.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                               3.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                      M_MgO * (
+                                                                                                      dM_FeO_er - 2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                      -3.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                      -3.0 * dM_FeO_er + 2.0 * dM_MgO_er + 5.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      -5.0 * dM_FeO_er - 8.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                      -2.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er)))) + M_O * (
+                                                                                                      M_MgO * (M_FeO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -3.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                      3.0 * dM_FeSiO3_er + 3.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                               M_SiO2 * (
+                                                                                                               -3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 6.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                               -3.0 * dM_FeO_er + 3.0 * dM_MgSiO3_er + 3.0 * dM_SiO2_er))) + M_MgSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -3.0 * dM_FeO_er - 6.0 * dM_FeSiO3_er - 3.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                      3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                      M_SiO2 * (
+                                                                                                      -3.0 * dM_FeSiO3_er - 3.0 * dM_MgSiO3_er - 3.0 * dM_SiO2_er) + M_m * (
+                                                                                                      -3.0 * dM_FeO_er - 3.0 * dM_MgO_er + 3.0 * dM_SiO2_er)))) + dKSiO2_KSiO2 * (
+                                                                                                      M_Fe * (M_MgO * (
+                                                                                                      M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              M_MgO * (
+                                                                                                              -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              -M_SiO2 + M_m) + M_MgO * (
+                                                                                                              -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                                              M_MgO * (
+                                                                                                              M_FeSiO3 * (
+                                                                                                              3.0 * M_FeO - 5.0 * M_m) + M_SiO2 * (
+                                                                                                              M_FeO - 3.0 * M_m)) + M_MgSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              3.0 * M_MgO + M_SiO2) + M_FeSiO3 * (
+                                                                                                              3.0 * M_FeO + 3.0 * M_MgO - 5.0 * M_m) + M_MgO * (
+                                                                                                              3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m))) + M_Mg * (
+                                                                                                      M_Fe * (
+                                                                                                      M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      -M_SiO2 + M_m) + M_MgO * (
+                                                                                                      -M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      -M_SiO2 + M_m) + M_MgO * (
+                                                                                                      -M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                                                                                                      M_FeSiO3 * (
+                                                                                                      3.0 * M_FeO + 3.0 * M_MgO - 5.0 * M_m) + M_MgSiO3 * (
+                                                                                                      3.0 * M_FeO + 3.0 * M_MgO - 5.0 * M_m) + M_SiO2 * (
+                                                                                                      M_FeO + M_MgO - 3.0 * M_m)) + M_SiO2 * M_m * (
+                                                                                                      M_FeO + M_MgO)) + M_MgO * (
+                                                                                                      M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                      M_FeO * (M_MgO * (
+                                                                                                      -M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      -M_SiO2 + M_m) + M_MgO * (
+                                                                                                      -M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+                                                                                                      M_FeO * M_SiO2 * (
+                                                                                                      M_MgO - 3.0 * M_m) + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      3.0 * M_MgO + 3.0 * M_SiO2 - 3.0 * M_m) + M_SiO2 * (
+                                                                                                      M_MgO - 3.0 * M_m)) + M_MgSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      3.0 * M_MgO - 5.0 * M_m) + M_FeSiO3 * (
+                                                                                                      3.0 * M_FeO + 3.0 * M_MgO - 5.0 * M_m)))) + M_O * (
+                                                                                                      M_MgO * (
+                                                                                                      -3.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                      M_FeO * (M_MgO * (
+                                                                                                      3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                      M_FeO * (
+                                                                                                      3.0 * M_SiO2 - 3.0 * M_m) + M_MgO * (
+                                                                                                      3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m)))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
+
+    def dM_O_dTc(self, Moles, dKs, dMi_b):
+        dM_Mg_er, dM_Si_er, dM_Fe_er, dM_O_er, dM_c_er, dM_MgO_er, dM_SiO2_er, dM_FeO_er, dM_MgSiO3_er, dM_FeSiO3_er, dM_m_er = self.unwrap_Moles(
+            dMi_b)
         M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
         dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
         return M_O * (M_Fe * dKFeO_KFeO * (M_Si * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (2 * M_SiO2 - 5 * M_m) - 3 * M_SiO2 * M_m) + M_FeSiO3 * (
-        M_SiO2 * (3 * M_FeO + M_MgO - 3 * M_m) + M_m * (-3 * M_FeO + 2 * M_MgO))) + M_MgO * (
-                                                   -3 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                   -3 * M_FeO * M_m + M_SiO2 * (3 * M_FeO - 3 * M_m))) + M_MgSiO3 * (
-                                                   M_FeO * (
-                                                   -3 * M_MgO * M_m + M_SiO2 * (3 * M_MgO - 3 * M_m)) + M_FeSiO3 * (
-                                                   M_SiO2 * (3 * M_FeO + 3 * M_MgO - 3 * M_m) + M_m * (
-                                                   -3 * M_FeO - 3 * M_MgO)))) + M_c * (M_Mg * (
-        M_FeO * M_m * (-M_MgSiO3 - M_SiO2) + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_MgO * (
-                                                                                       -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                       -M_FeO * M_m + M_SiO2 * (
-                                                                                       M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                       M_FeO * (
-                                                                                       -M_MgO * M_m + M_SiO2 * (
-                                                                                       M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                       M_SiO2 * (
-                                                                                       M_FeO + M_MgO - M_m) + M_m * (
-                                                                                       -M_FeO - M_MgO))) + M_Si * (
-                                                                                       M_Mg * (M_FeO * (
-                                                                                       -2 * M_MgSiO3 - M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                               2 * M_MgO + M_SiO2 - 3 * M_m)) + M_MgO * (
-                                                                                       M_FeO * (
-                                                                                       -M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                       M_SiO2 - 3 * M_m)) + M_MgSiO3 * (
-                                                                                       M_FeO * (
-                                                                                       -M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                       M_SiO2 - 3 * M_m))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
-                      M_Si * (M_Fe * (M_MgO * (2 * M_FeO * M_m + M_SiO2 * (M_FeO - 3 * M_m)) + M_MgSiO3 * (
-                      M_SiO2 * (M_FeO + 3 * M_MgO - 3 * M_m) + M_m * (2 * M_FeO - 3 * M_MgO))) + M_Mg * (
-                              M_Fe * (M_SiO2 * (M_FeO + M_MgO - 3 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO)) + M_FeO * (
-                              M_MgO * (M_SiO2 + 2 * M_m) + M_MgSiO3 * (-2 * M_SiO2 + 5 * M_m)))) + M_c * (M_Fe * (
-                      M_MgO * M_SiO2 * (M_FeO - M_m) + M_MgSiO3 * (
-                      -M_MgO * M_m + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_Mg * (M_FeO * M_MgSiO3 * M_m + M_SiO2 * (
-                      M_Fe * (M_FeO + M_MgO - M_m) + M_FeO * M_MgO)) + M_Si * (M_Fe * (
-                      M_MgO * (2 * M_FeO + M_SiO2 - 3 * M_m) + M_MgSiO3 * (2 * M_FeO + M_SiO2 - 3 * M_m)) + M_FeO * (
-                                                                               M_MgO * (
-                                                                               2 * M_SiO2 - 2 * M_m) + M_MgSiO3 * (
-                                                                               2 * M_SiO2 - 2 * M_m)) + M_Mg * (M_Fe * (
-                      2 * M_FeO + 2 * M_MgO + M_SiO2 - 3 * M_m) + M_FeO * (
-                                                                                                                2 * M_MgO + 2 * M_MgSiO3 + 2 * M_SiO2 - 2 * M_m))))) + M_Mg * dKMgO_KMgO * (
-                      M_Si * (M_Fe * (M_MgO * (M_FeSiO3 * (2 * M_SiO2 - 5 * M_m) - 3 * M_SiO2 * M_m) + M_MgSiO3 * (
-                      M_SiO2 * (M_FeO + 3 * M_MgO - 3 * M_m) + M_m * (2 * M_FeO - 3 * M_MgO))) + M_MgO * (
-                              -3 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                              -3 * M_FeO * M_m + M_SiO2 * (3 * M_FeO - 3 * M_m))) + M_MgSiO3 * (
-                              M_FeO * (-3 * M_MgO * M_m + M_SiO2 * (3 * M_MgO - 3 * M_m)) + M_FeSiO3 * (
-                              M_SiO2 * (3 * M_FeO + 3 * M_MgO - 3 * M_m) + M_m * (-3 * M_FeO - 3 * M_MgO)))) + M_c * (
-                      M_Fe * (M_MgO * M_m * (-M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
-                      -M_MgO * M_m + M_SiO2 * (M_FeO + M_MgO - M_m))) + M_MgO * (
-                      -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                      M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_Si * (M_Fe * (
-                      M_MgO * (-2 * M_FeSiO3 - M_SiO2 - M_m) + M_MgSiO3 * (2 * M_FeO + M_SiO2 - 3 * M_m)) + M_MgO * (
-                                                                                          M_FeO * (
-                                                                                          -M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                          -M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                          M_FeO * (
-                                                                                          M_SiO2 - 3 * M_m) + M_FeSiO3 * (
-                                                                                          M_SiO2 - 3 * M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
+        M_FeO * (M_MgSiO3 * (2.0 * M_SiO2 - 5.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+        M_FeO * (3.0 * M_SiO2 - 3.0 * M_m) + M_MgO * (M_SiO2 + 2.0 * M_m) - 3.0 * M_SiO2 * M_m)) + M_MgO * (
+                                                   -3.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (
+                                                   3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                   M_FeO * (M_MgO * (
+                                                   3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                   M_FeO * (3.0 * M_SiO2 - 3.0 * M_m) + M_MgO * (
+                                                   3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m))) + M_c * (M_Mg * (
+        M_FeO * M_m * (-M_MgSiO3 - M_SiO2) + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_SiO2 * (M_MgO - M_m))) + M_MgO * (
+                                                                                                              -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              M_MgO * (
+                                                                                                              M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              M_SiO2 - M_m) + M_MgO * (
+                                                                                                              M_SiO2 - M_m) - M_SiO2 * M_m)) + M_Si * (
+                                                                                                              M_Mg * (
+                                                                                                              M_FeO * (
+                                                                                                              -2.0 * M_MgSiO3 - M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                              2.0 * M_MgO + M_SiO2 - 3.0 * M_m)) + M_MgO * (
+                                                                                                              M_FeO * (
+                                                                                                              -M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                              M_SiO2 - 3.0 * M_m)) + M_MgSiO3 * (
+                                                                                                              M_FeO * (
+                                                                                                              -M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                              M_SiO2 - 3.0 * M_m))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
+                      M_Si * (M_Fe * (M_MgO * (M_FeO * (M_SiO2 + 2.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                      M_FeO * (M_SiO2 + 2.0 * M_m) + M_MgO * (
+                      3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m)) + M_Mg * (M_Fe * (
+                      M_FeO * (M_SiO2 + 2.0 * M_m) + M_MgO * (M_SiO2 + 2.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                 M_MgO * (
+                                                                                 M_SiO2 + 2.0 * M_m) + M_MgSiO3 * (
+                                                                                 -2.0 * M_SiO2 + 5.0 * M_m)))) + M_c * (
+                      M_Fe * (M_MgO * M_SiO2 * (M_FeO - M_m) + M_MgSiO3 * (
+                      M_MgO * (M_SiO2 - M_m) + M_SiO2 * (M_FeO - M_m))) + M_Mg * (
+                      M_Fe * M_SiO2 * (M_FeO + M_MgO - M_m) + M_FeO * (M_MgO * M_SiO2 + M_MgSiO3 * M_m)) + M_Si * (
+                      M_Fe * (M_MgO * (2.0 * M_FeO + M_SiO2 - 3.0 * M_m) + M_MgSiO3 * (
+                      2.0 * M_FeO + M_SiO2 - 3.0 * M_m)) + M_FeO * (
+                      M_MgO * (2.0 * M_SiO2 - 2.0 * M_m) + M_MgSiO3 * (2.0 * M_SiO2 - 2.0 * M_m)) + M_Mg * (
+                      M_Fe * (2.0 * M_FeO + 2.0 * M_MgO + M_SiO2 - 3.0 * M_m) + M_FeO * (
+                      2.0 * M_MgO + 2.0 * M_MgSiO3 + 2.0 * M_SiO2 - 2.0 * M_m))))) + M_Mg * dKMgO_KMgO * (M_Si * (
+        M_Fe * (M_MgO * (M_FeSiO3 * (2.0 * M_SiO2 - 5.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+        M_FeO * (M_SiO2 + 2.0 * M_m) + M_MgO * (3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m)) + M_MgO * (
+        -3.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+        M_FeO * (3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+        M_FeO * (M_MgO * (3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+        M_FeO * (3.0 * M_SiO2 - 3.0 * M_m) + M_MgO * (3.0 * M_SiO2 - 3.0 * M_m) - 3.0 * M_SiO2 * M_m))) + M_c * (
+                                                                                                          M_Fe * (
+                                                                                                          M_MgO * M_m * (
+                                                                                                          -M_FeSiO3 - M_SiO2) + M_MgSiO3 * (
+                                                                                                          M_MgO * (
+                                                                                                          M_SiO2 - M_m) + M_SiO2 * (
+                                                                                                          M_FeO - M_m))) + M_MgO * (
+                                                                                                          -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_MgO * (
+                                                                                                          M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_SiO2 - M_m) + M_MgO * (
+                                                                                                          M_SiO2 - M_m) - M_SiO2 * M_m)) + M_Si * (
+                                                                                                          M_Fe * (
+                                                                                                          M_MgO * (
+                                                                                                          -2.0 * M_FeSiO3 - M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                          2.0 * M_FeO + M_SiO2 - 3.0 * M_m)) + M_MgO * (
+                                                                                                          M_FeO * (
+                                                                                                          -M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                          -M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                                          M_FeO * (
+                                                                                                          M_SiO2 - 3.0 * M_m) + M_FeSiO3 * (
+                                                                                                          M_SiO2 - 3.0 * M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (
                       M_Si * (
-                      M_Fe * M_MgO * (M_FeO * (M_SiO2 + 2 * M_m) + M_FeSiO3 * (-2 * M_SiO2 + 5 * M_m)) + M_Mg * (
-                      M_Fe * (M_SiO2 * (M_FeO + M_MgO - 3 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO)) + M_FeO * (
-                      2 * M_MgO * M_m + M_SiO2 * (M_MgO - 3 * M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (3 * M_FeO + M_MgO - 3 * M_m) + M_m * (-3 * M_FeO + 2 * M_MgO)))) + M_c * (
-                      M_Fe * M_MgO * (M_FeO * M_SiO2 + M_FeSiO3 * M_m) + M_Mg * (
-                      M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO + M_MgO - M_m)) + M_SiO2 * (
-                      M_Fe * (M_FeO + M_MgO - M_m) + M_FeO * (M_MgO - M_m))) + M_Si * (M_Mg * (
-                      M_Fe * (2 * M_FeO + 2 * M_MgO + M_SiO2 - 3 * M_m) + M_FeO * (
-                      2 * M_MgO + M_SiO2 - 3 * M_m) + M_FeSiO3 * (2 * M_MgO + M_SiO2 - 3 * M_m)) + M_MgO * (M_Fe * (
-                      2 * M_FeO + 2 * M_FeSiO3 + 2 * M_SiO2 - 2 * M_m) + M_FeO * (2 * M_SiO2 - 2 * M_m) + M_FeSiO3 * (
-                                                                                                            2 * M_SiO2 - 2 * M_m))))) + M_Si * dKSiO2_KSiO2 * (
-                      M_Fe * (M_MgO * (2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                      2 * M_FeO * M_m + M_SiO2 * (-2 * M_FeO + 2 * M_m))) + M_MgSiO3 * (
-                              M_FeO * (2 * M_MgO * M_m + M_SiO2 * (-2 * M_MgO + 2 * M_m)) + M_FeSiO3 * (
-                              M_SiO2 * (-2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO)))) + M_Mg * (
-                      M_Fe * (M_FeSiO3 * (
-                      M_SiO2 * (-2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO)) + M_MgSiO3 * (
-                              M_SiO2 * (-2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (
-                              2 * M_FeO + 2 * M_MgO)) + M_SiO2 * M_m * (2 * M_FeO + 2 * M_MgO)) + M_MgO * (
-                      2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                      2 * M_FeO * M_m + M_SiO2 * (-2 * M_FeO + 2 * M_m))) + M_MgSiO3 * (
-                      M_FeO * (2 * M_MgO * M_m + M_SiO2 * (-2 * M_MgO + 2 * M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (-2 * M_FeO - 2 * M_MgO + 2 * M_m) + M_m * (2 * M_FeO + 2 * M_MgO)))) + M_c * (M_Fe * (
-                      M_MgO * (M_FeSiO3 * (2 * M_FeO - 3 * M_m) + M_SiO2 * (M_FeO - 2 * M_m)) + M_MgSiO3 * (
-                      M_FeSiO3 * (2 * M_FeO + 2 * M_MgO - 3 * M_m) + M_MgO * (2 * M_FeO - 2 * M_m) + M_SiO2 * (
-                      M_FeO + 2 * M_MgO - 2 * M_m))) + M_Mg * (M_Fe * (
-                      M_FeSiO3 * (2 * M_FeO + 2 * M_MgO - 3 * M_m) + M_MgSiO3 * (
-                      2 * M_FeO + 2 * M_MgO - 3 * M_m) + M_SiO2 * (M_FeO + M_MgO - 2 * M_m)) + M_FeO * M_SiO2 * (
-                                                               M_MgO - 2 * M_m) + M_FeSiO3 * (
-                                                               M_FeO * (2 * M_MgO - 2 * M_m) + M_SiO2 * (
-                                                               2 * M_FeO + M_MgO - 2 * M_m)) + M_MgSiO3 * (
-                                                               M_FeO * (2 * M_MgO - 3 * M_m) + M_FeSiO3 * (
-                                                               2 * M_FeO + 2 * M_MgO - 3 * M_m))) + M_MgO * (
-                                                                                                              -2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                              -2 * M_FeO * M_m + M_SiO2 * (
-                                                                                                              2 * M_FeO - 2 * M_m))) + M_MgSiO3 * (
-                                                                                                              M_FeO * (
-                                                                                                              -2 * M_MgO * M_m + M_SiO2 * (
-                                                                                                              2 * M_MgO - 2 * M_m)) + M_FeSiO3 * (
-                                                                                                              M_SiO2 * (
-                                                                                                              2 * M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (
-                                                                                                              -2 * M_FeO - 2 * M_MgO)))))) / (
-               M_O * (M_Fe * (M_MgO * (
-               4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                              M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)))) + M_Mg * (
-                      M_Fe * (M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                              4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgO * (
-                      4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                      4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                      M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-               M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-               4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-               -M_FeO + 9 * M_m)) + M_MgSiO3 * (4 * M_FeO * M_m + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (-9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (M_Fe * (
-               M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_MgSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-               M_FeSiO3 * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO - M_MgO + 9 * M_m) + M_m * (
-               4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (M_FeO + M_MgO)) + M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-               M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (M_FeO * (
-               M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-               M_FeO + M_MgO))) + M_O * (M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-M_MgO + 9 * M_m)) + M_FeSiO3 * (
-               9 * M_FeO * M_m + M_MgO * (-9 * M_FeO + 4 * M_m) + M_SiO2 * (
-               -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (M_FeO * (-9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (M_MgO * (
-               9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (9 * M_FeO * M_m + M_SiO2 * (-9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                           M_FeO * (9 * M_MgO * M_m + M_SiO2 * (
-                                                                           -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                           M_SiO2 * (
-                                                                           -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                           9 * M_FeO + 9 * M_MgO))))) + M_c * (M_Fe * (
-               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-               M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-               M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-               M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
-               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (M_FeO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_O * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO))) + M_O * (
-                                                                                                               M_FeO * M_SiO2 * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)))) + M_Si * (
-                                                                                                               M_Fe * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                                               4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                               M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_MgO * (
-                                                                                                               4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                               4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                               -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                               4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                               4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m))))))
-
-    def dM_MgO_dTc(self, Moles, dKs):
-        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
-        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_MgO * (M_Fe * dKFeO_KFeO * (M_Mg * M_O * (
-        M_FeO * (M_MgSiO3 * (-4 * M_SiO2 + 4 * M_m) + 4 * M_SiO2 * M_m) + M_FeSiO3 * (
-        4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_Si * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
-        M_FeO * M_m + M_SiO2 * (-M_FeO + M_m)) + M_O * (M_FeO * (-9 * M_MgSiO3 - M_SiO2 + 4 * M_m) + M_FeSiO3 * (
-        -9 * M_FeO + 2 * M_SiO2 + 10 * M_m))) + M_MgSiO3 * M_O * (M_FeO * (-3 * M_SiO2 - 6 * M_m) + M_FeSiO3 * (
-        6 * M_SiO2 - 15 * M_m))) + M_c * (M_Mg * (
-        M_FeO * (M_MgSiO3 * (M_SiO2 - M_m) + M_O * (M_FeSiO3 + M_MgSiO3 + M_SiO2) - M_SiO2 * M_m) + M_FeSiO3 * (
-        -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * M_O * (M_FeO * M_SiO2 + M_FeSiO3 * M_m) + M_Si * (M_Mg * (
-        M_FeO * (4 * M_MgSiO3 + M_SiO2 - M_m) + M_FeSiO3 * (4 * M_FeO - M_SiO2 - 3 * M_m) + M_O * (
-        M_FeO + M_FeSiO3)) + M_MgSiO3 * (M_FeO * (2 * M_SiO2 + 2 * M_m) + M_FeSiO3 * (
-        -2 * M_SiO2 + 6 * M_m))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (M_O * (
-        M_Fe * M_FeO * M_MgSiO3 * (4 * M_SiO2 - 4 * M_m) + M_Mg * (
-        4 * M_Fe * M_SiO2 * M_m + M_FeO * M_MgSiO3 * (4 * M_SiO2 - 4 * M_m))) + M_Si * (M_Mg * (
-        M_Fe * (M_O * (2 * M_SiO2 + 10 * M_m) + M_SiO2 * M_m) + M_FeO * (
-        M_MgSiO3 * (M_SiO2 - M_m) + M_O * (9 * M_MgSiO3 + 3 * M_SiO2 + 6 * M_m))) + M_MgSiO3 * (M_Fe * (
-        M_FeO * (M_SiO2 - M_m) + M_O * (9 * M_FeO + 6 * M_SiO2 - 15 * M_m)) + M_FeO * M_O * (
-                                                                                                9 * M_SiO2 - 9 * M_m))) + M_c * (
-                                                                    M_Mg * (-M_Fe * M_SiO2 * M_m + M_FeO * (
-                                                                    M_MgSiO3 * (-M_SiO2 + M_m) + M_O * (
-                                                                    -M_MgSiO3 - M_SiO2))) + M_MgSiO3 * (M_Fe * (
-                                                                    M_FeO * (-M_SiO2 + M_m) + M_O * (
-                                                                    -M_FeO + M_m)) + M_FeO * M_O * (
-                                                                                                        -M_SiO2 + M_m)) + M_Si * (
-                                                                    M_Mg * (M_Fe * (M_O - M_SiO2 - 3 * M_m) + M_FeO * (
-                                                                    -4 * M_MgSiO3 - 2 * M_SiO2 - 2 * M_m)) + M_MgSiO3 * (
-                                                                    M_Fe * (
-                                                                    -4 * M_FeO - 2 * M_SiO2 + 6 * M_m) + M_FeO * (
-                                                                    -4 * M_SiO2 + 4 * M_m))))) + M_Mg * dKMgO_KMgO * (
-                        M_Fe * M_O * (M_FeO * (M_MgSiO3 * (4 * M_SiO2 - 4 * M_m) - 4 * M_SiO2 * M_m) + M_FeSiO3 * (
-                        -4 * M_FeO * M_m + M_SiO2 * (4 * M_FeO - 4 * M_m))) + M_Si * (M_Fe * (
-                        M_FeO * (M_MgSiO3 * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
-                        -M_FeO * M_m + M_SiO2 * (M_FeO - M_m)) + M_O * (
-                        -4 * M_FeO * M_m + M_FeSiO3 * (9 * M_FeO + 4 * M_SiO2 - 25 * M_m) + M_MgSiO3 * (
-                        9 * M_FeO + 6 * M_SiO2 - 15 * M_m) + M_SiO2 * (M_FeO - 9 * M_m))) + M_O * (
-                                                                                      -9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                      -9 * M_FeO * M_m + M_SiO2 * (
-                                                                                      9 * M_FeO - 9 * M_m)) + M_MgSiO3 * (
-                                                                                      M_FeO * (
-                                                                                      6 * M_SiO2 - 15 * M_m) + M_FeSiO3 * (
-                                                                                      6 * M_SiO2 - 15 * M_m)))) + M_c * (
-                        M_Fe * (M_FeO * (M_MgSiO3 * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
-                        M_FeO * M_m + M_SiO2 * (-M_FeO + M_m)) + M_O * (
-                                M_FeSiO3 * (-M_FeO + M_m) + M_MgSiO3 * (-M_FeO + M_m) + M_SiO2 * (
-                                -M_FeO + M_m))) + M_O * (M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m)) + M_m * (
-                        M_FeO * M_SiO2 + M_MgSiO3 * (M_FeO + M_FeSiO3))) + M_Si * (M_Fe * (
-                        M_FeO * M_m + M_FeSiO3 * (-4 * M_FeO - M_SiO2 + 9 * M_m) + M_MgSiO3 * (
-                        -4 * M_FeO - 2 * M_SiO2 + 6 * M_m) + M_O * (-M_FeO - M_FeSiO3 - M_SiO2 + M_m) + M_SiO2 * (
-                        -M_FeO + 4 * M_m)) + 4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (
-                        -4 * M_FeO + 4 * M_m)) + M_MgSiO3 * (M_FeO * (-2 * M_SiO2 + 6 * M_m) + M_FeSiO3 * (
-                        -2 * M_SiO2 + 6 * M_m)) + M_O * (M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (
-                        -M_SiO2 + M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_O * (
-        M_Fe * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_Mg * (
-        M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m)) + M_SiO2 * M_m * (
-        4 * M_Fe + 4 * M_FeO))) + M_Si * (M_Fe * (
-        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m)) + M_O * (
-        4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO + 9 * M_m))) + M_Mg * (
-                                          M_Fe * (M_O * (
-                                          2 * M_SiO2 + 10 * M_m) + M_SiO2 * M_m) + M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                          M_FeO * M_m + M_SiO2 * (-M_FeO + M_m)) + M_O * (
-                                          M_FeO * (2 * M_SiO2 + 10 * M_m) + M_FeSiO3 * (
-                                          -9 * M_FeO + 2 * M_SiO2 + 10 * M_m))) + M_O * (
-                                          9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                          9 * M_FeO * M_m + M_SiO2 * (-9 * M_FeO + 9 * M_m)))) + M_c * (M_Fe * (
-        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m)) + M_O * (
-        M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m))) + M_Mg * (M_FeSiO3 * (
-        M_FeO * (M_O - M_m) + M_SiO2 * (M_FeO - M_m)) + M_SiO2 * M_m * (-M_Fe - M_FeO)) + M_O * (
-                                                                                                        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                        -M_FeO * M_m + M_SiO2 * (
-                                                                                                        M_FeO - M_m))) + M_Si * (
-                                                                                                        M_Fe * (
-                                                                                                        -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                        4 * M_FeO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                        M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                        M_FeO - 4 * M_m)) - 4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                        -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                        4 * M_FeO - 4 * M_m)) + M_Mg * (
-                                                                                                        M_Fe * (
-                                                                                                        M_O - M_SiO2 - 3 * M_m) + M_FeO * (
-                                                                                                        -M_SiO2 - 3 * M_m) + M_FeSiO3 * (
-                                                                                                        4 * M_FeO - M_SiO2 - 3 * M_m) + M_O * (
-                                                                                                        M_FeO + M_FeSiO3)) + M_O * (
-                                                                                                        M_FeO * (
-                                                                                                        M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                        M_SiO2 - M_m))))) + M_Si * dKSiO2_KSiO2 * (
-                        M_O * (M_Fe * M_MgSiO3 * (
-                        M_FeO * (2 * M_SiO2 + 4 * M_m) + M_FeSiO3 * (-4 * M_SiO2 + 10 * M_m)) + M_Mg * (M_Fe * (
-                        M_FeSiO3 * (-4 * M_SiO2 + 10 * M_m) + M_MgSiO3 * (
-                        -4 * M_SiO2 + 10 * M_m) + 6 * M_SiO2 * M_m) + 6 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                        6 * M_FeO * M_m + M_SiO2 * (
-                                                                                                        -6 * M_FeO + 6 * M_m)) + M_MgSiO3 * (
-                                                                                                        M_FeO * (
-                                                                                                        -4 * M_SiO2 + 10 * M_m) + M_FeSiO3 * (
-                                                                                                        -4 * M_SiO2 + 10 * M_m)))) + M_c * (
-                        M_Mg * (M_Fe * (M_FeSiO3 * (M_SiO2 - 3 * M_m) + M_MgSiO3 * (M_SiO2 - 3 * M_m) + M_O * (
-                        M_FeSiO3 + M_MgSiO3 + M_SiO2) - 2 * M_SiO2 * M_m) - 2 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                -2 * M_FeO * M_m + M_SiO2 * (2 * M_FeO - 2 * M_m)) + M_MgSiO3 * (
-                                M_FeO * (M_SiO2 - 3 * M_m) + M_FeSiO3 * (M_SiO2 - 3 * M_m)) + M_O * (
-                                M_MgSiO3 * (M_FeO + M_FeSiO3) + M_SiO2 * (M_FeO + M_FeSiO3))) + M_MgSiO3 * (M_Fe * (
-                        M_FeO * (-M_SiO2 - M_m) + M_FeSiO3 * (M_SiO2 - 3 * M_m) + M_O * (
-                        M_FeO + M_FeSiO3 + M_SiO2 - M_m)) + M_O * (M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
-                        M_SiO2 - M_m)))))) / (M_O * (M_Fe * (M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                             M_FeO * (4 * M_MgO * M_m + M_SiO2 * (
-                                                             -4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                             M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                             4 * M_FeO + 4 * M_MgO)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-        4 * M_FeO + 4 * M_MgO)) + M_MgO * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (M_FeO * (
-        4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-        M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-        M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-        4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                           4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                           -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                           -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (
-                                                                                        M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                            M_FeO + M_MgO)) + M_MgSiO3 * (
-                                                                                                M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                M_FeO + M_MgO)) + M_O * (
-                                                                                                M_FeSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + 9 * M_m) + M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                                M_FeO + M_MgO)) + M_MgO * (
-                                                                                        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        M_FeO * M_m + M_SiO2 * (
-                                                                                        -M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                        M_FeO + M_MgO))) + M_O * (
-                                                                                        M_FeO * (
-                                                                                        4 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_MgO * (
-                                                                                        -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                        -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
-                                                                                        M_MgO * (
-                                                                                        9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_SiO2 * (
-                                                                                        -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        9 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                        9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                                              M_Fe * (M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                              -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                                                      M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-                                                      M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (
-                                                      -M_FeO - M_MgO))) + M_O * (M_MgO * (
-                                              M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
-                                                                                 M_FeSiO3 * (
-                                                                                 M_FeO + M_MgO - M_m) + M_MgO * (
-                                                                                 M_FeO - M_m) + M_SiO2 * (
-                                                                                 M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                              M_Fe * (M_FeSiO3 * (
-                                              M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                      M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-                                                      M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                      M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                      M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                      -M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                              -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                                              M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-                                              M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
-                                              M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
-                                              M_FeO * (M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                              M_FeO * (M_MgO - M_m) + M_FeSiO3 * (M_FeO + M_MgO - M_m)))) + M_O * (
-                                              M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                              -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-                                              M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-                                              M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)))) + M_Si * (
-                                              M_Fe * (M_MgO * (
-                                              -M_FeO * M_m + M_FeSiO3 * (4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                              M_FeO - 4 * M_m)) + M_MgSiO3 * (-M_FeO * M_m + M_FeSiO3 * (
-                                              4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                              4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                              M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                      M_MgO * (M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                      M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (M_Fe * (
-                                              M_FeSiO3 * (4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                              4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                              M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                              M_FeO + M_MgO - 4 * M_m) + M_m * (-M_FeO - M_MgO)) + M_FeO * (
-                                                                                                   -M_MgO * M_m + M_SiO2 * (
-                                                                                                   M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                   -4 * M_FeO * M_m + M_MgO * (
-                                                                                                   4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                   4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                   M_FeO * (
-                                                                                                   4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                   4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                   M_FeO * (
-                                                                                                   M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                   M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                   M_FeO + M_FeSiO3))) + M_MgO * (
-                                              -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                              -4 * M_FeO * M_m + M_SiO2 * (4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                              M_FeO * (-4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                              M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                              -4 * M_FeO - 4 * M_MgO))) + M_O * (M_MgO * (
-                                              M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                 M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                 M_SiO2 - M_m))))))
-
-    def dM_m_dTc(self, Moles, dKs):
-        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
-        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_m * (M_Fe * dKFeO_KFeO * (
-        M_Mg * M_O * M_SiO2 * (-4 * M_FeO * M_MgSiO3 + 4 * M_FeSiO3 * M_MgO) + M_Si * (M_Mg * (
-        M_O * (M_FeO * (-15 * M_MgSiO3 - 3 * M_SiO2) + M_FeSiO3 * (-9 * M_FeO + 6 * M_MgO + 6 * M_SiO2)) + M_SiO2 * (
-        -M_FeO * M_MgSiO3 + M_FeSiO3 * M_MgO)) + M_O * (M_MgO * (
-        -3 * M_FeO * M_SiO2 + M_FeSiO3 * (-9 * M_FeO + 6 * M_SiO2)) + M_MgSiO3 * (
-                                                        M_FeO * (-9 * M_MgO - 3 * M_SiO2) + M_FeSiO3 * (
-                                                        -9 * M_FeO - 9 * M_MgO + 6 * M_SiO2)))) + M_c * (
-        M_Mg * (M_FeO * M_O * (M_FeSiO3 + M_MgSiO3 + M_SiO2) + M_SiO2 * (M_FeO * M_MgSiO3 - M_FeSiO3 * M_MgO)) + M_O * (
-        M_FeO * M_MgO * (M_FeSiO3 + M_SiO2) + M_MgSiO3 * (
-        M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO))) + M_Si * (M_Mg * (
-        M_FeO * (6 * M_MgSiO3 + 2 * M_SiO2) + M_FeSiO3 * (4 * M_FeO - 2 * M_MgO - 2 * M_SiO2) + M_O * (
-        M_FeO + M_FeSiO3)) + M_MgO * (2 * M_FeO * M_SiO2 + M_FeSiO3 * (4 * M_FeO - 2 * M_SiO2)) + M_MgSiO3 * (M_FeO * (
-        4 * M_MgO + 2 * M_SiO2) + M_FeSiO3 * (4 * M_FeO + 4 * M_MgO - 2 * M_SiO2)) + M_O * (
-                                                                          M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
-                                                                          M_FeO + M_FeSiO3))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (
-                      M_O * M_SiO2 * (M_Fe * M_FeO * (4 * M_MgO + 4 * M_MgSiO3) + M_Mg * (
-                      M_Fe * (4 * M_FeO + 4 * M_MgO) + M_FeO * (4 * M_MgO + 4 * M_MgSiO3))) + M_Si * (M_Fe * (
-                      M_FeO * M_SiO2 * (M_MgO + M_MgSiO3) + M_O * (M_MgO * (6 * M_FeO + 6 * M_SiO2) + M_MgSiO3 * (
-                      6 * M_FeO - 9 * M_MgO + 6 * M_SiO2))) + M_FeO * M_O * M_SiO2 * (
-                                                                                                      9 * M_MgO + 9 * M_MgSiO3) + M_Mg * (
-                                                                                                      M_Fe * (M_O * (
-                                                                                                      6 * M_FeO + 6 * M_MgO + 6 * M_SiO2) + M_SiO2 * (
-                                                                                                              M_FeO + M_MgO)) + M_FeO * (
-                                                                                                      M_O * (
-                                                                                                      6 * M_MgO + 15 * M_MgSiO3 + 9 * M_SiO2) + M_SiO2 * (
-                                                                                                      M_MgO + M_MgSiO3)))) + M_c * (
+                      M_Fe * M_MgO * (M_FeO * (M_SiO2 + 2.0 * M_m) + M_FeSiO3 * (-2.0 * M_SiO2 + 5.0 * M_m)) + M_Mg * (
                       M_Fe * (
-                      -M_FeO * M_MgO * M_SiO2 + M_MgSiO3 * (-M_FeO * M_SiO2 + M_MgO * M_O)) + M_FeO * M_O * M_SiO2 * (
-                      -M_MgO - M_MgSiO3) + M_Mg * (M_FeO * M_O * (-M_MgSiO3 - M_SiO2) + M_SiO2 * (
-                      M_Fe * (-M_FeO - M_MgO) + M_FeO * (-M_MgO - M_MgSiO3))) + M_Si * (M_Fe * (
-                      M_MgO * (-2 * M_FeO - 2 * M_SiO2) + M_MgSiO3 * (-2 * M_FeO + 4 * M_MgO - 2 * M_SiO2) + M_O * (
-                      M_MgO + M_MgSiO3)) + M_FeO * M_SiO2 * (-4 * M_MgO - 4 * M_MgSiO3) + M_Mg * (M_Fe * (
-                      -2 * M_FeO - 2 * M_MgO + M_O - 2 * M_SiO2) + M_FeO * (
-                                                                                                  -2 * M_MgO - 6 * M_MgSiO3 - 4 * M_SiO2))))) + M_Mg * dKMgO_KMgO * (
-                      M_Fe * M_O * M_SiO2 * (4 * M_FeO * M_MgSiO3 - 4 * M_FeSiO3 * M_MgO) + M_Si * (M_Fe * (M_O * (
-                      M_MgO * (-15 * M_FeSiO3 - 3 * M_SiO2) + M_MgSiO3 * (
-                      6 * M_FeO - 9 * M_MgO + 6 * M_SiO2)) + M_SiO2 * (M_FeO * M_MgSiO3 - M_FeSiO3 * M_MgO)) + M_O * (
-                                                                                                    M_MgO * (
-                                                                                                    -3 * M_FeO * M_SiO2 + M_FeSiO3 * (
-                                                                                                    -9 * M_FeO - 3 * M_SiO2)) + M_MgSiO3 * (
-                                                                                                    M_FeO * (
-                                                                                                    -9 * M_MgO + 6 * M_SiO2) + M_FeSiO3 * (
-                                                                                                    -9 * M_FeO - 9 * M_MgO + 6 * M_SiO2)))) + M_c * (
-                      M_Fe * (M_MgO * M_O * (M_FeSiO3 + M_MgSiO3 + M_SiO2) + M_SiO2 * (
-                      -M_FeO * M_MgSiO3 + M_FeSiO3 * M_MgO)) + M_O * (
-                      M_MgO * (M_FeO * M_SiO2 + M_FeSiO3 * (M_FeO + M_SiO2)) + M_MgSiO3 * (
-                      M_FeO * M_MgO + M_FeSiO3 * (M_FeO + M_MgO))) + M_Si * (M_Fe * (
-                      M_MgO * (6 * M_FeSiO3 + 2 * M_SiO2) + M_MgSiO3 * (-2 * M_FeO + 4 * M_MgO - 2 * M_SiO2) + M_O * (
-                      M_MgO + M_MgSiO3)) + M_MgO * (2 * M_FeO * M_SiO2 + M_FeSiO3 * (
-                      4 * M_FeO + 2 * M_SiO2)) + M_MgSiO3 * (M_FeO * (4 * M_MgO - 2 * M_SiO2) + M_FeSiO3 * (
-                      4 * M_FeO + 4 * M_MgO - 2 * M_SiO2)) + M_O * (M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
-                      M_FeO + M_FeSiO3))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_O * M_SiO2 * (
-        M_Fe * M_MgO * (4 * M_FeO + 4 * M_FeSiO3) + M_Mg * (
-        M_Fe * (4 * M_FeO + 4 * M_MgO) + M_MgO * (4 * M_FeO + 4 * M_FeSiO3))) + M_Si * (M_Mg * (
-        M_Fe * (M_O * (6 * M_FeO + 6 * M_MgO + 6 * M_SiO2) + M_SiO2 * (M_FeO + M_MgO)) + M_MgO * M_SiO2 * (
-        M_FeO + M_FeSiO3) + M_O * (
-        M_FeO * (6 * M_MgO + 6 * M_SiO2) + M_FeSiO3 * (-9 * M_FeO + 6 * M_MgO + 6 * M_SiO2))) + M_MgO * (M_Fe * (
-        M_O * (6 * M_FeO + 15 * M_FeSiO3 + 9 * M_SiO2) + M_SiO2 * (M_FeO + M_FeSiO3)) + M_O * M_SiO2 * (
-                                                                                                         9 * M_FeO + 9 * M_FeSiO3))) + M_c * (
-                                                                             M_Mg * (M_FeSiO3 * (
-                                                                             M_FeO * M_O - M_MgO * M_SiO2) + M_SiO2 * (
-                                                                                     M_Fe * (
-                                                                                     -M_FeO - M_MgO) - M_FeO * M_MgO)) + M_MgO * (
-                                                                             M_Fe * (
-                                                                             M_O * (-M_FeSiO3 - M_SiO2) + M_SiO2 * (
-                                                                             -M_FeO - M_FeSiO3)) + M_O * M_SiO2 * (
-                                                                             -M_FeO - M_FeSiO3)) + M_Si * (M_Mg * (
-                                                                             M_Fe * (
-                                                                             -2 * M_FeO - 2 * M_MgO + M_O - 2 * M_SiO2) + M_FeO * (
-                                                                             -2 * M_MgO - 2 * M_SiO2) + M_FeSiO3 * (
-                                                                             4 * M_FeO - 2 * M_MgO - 2 * M_SiO2) + M_O * (
-                                                                             M_FeO + M_FeSiO3)) + M_MgO * (M_Fe * (
-                                                                             -2 * M_FeO - 6 * M_FeSiO3 - 4 * M_SiO2) + M_SiO2 * (
-                                                                                                           -4 * M_FeO - 4 * M_FeSiO3))))) + M_Si * dKSiO2_KSiO2 * (
-                      M_O * (M_Fe * (M_MgO * (2 * M_FeO * M_SiO2 + M_FeSiO3 * (6 * M_FeO - 4 * M_SiO2)) + M_MgSiO3 * (
-                      M_FeO * (6 * M_MgO + 2 * M_SiO2) + M_FeSiO3 * (6 * M_FeO + 6 * M_MgO - 4 * M_SiO2))) + M_Mg * (
-                             M_Fe * (M_FeSiO3 * (6 * M_FeO + 6 * M_MgO - 4 * M_SiO2) + M_MgSiO3 * (
-                             6 * M_FeO + 6 * M_MgO - 4 * M_SiO2) + M_SiO2 * (2 * M_FeO + 2 * M_MgO)) + M_MgO * (
-                             2 * M_FeO * M_SiO2 + M_FeSiO3 * (6 * M_FeO + 2 * M_SiO2)) + M_MgSiO3 * (
-                             M_FeO * (6 * M_MgO - 4 * M_SiO2) + M_FeSiO3 * (
-                             6 * M_FeO + 6 * M_MgO - 4 * M_SiO2)))) + M_c * (M_Fe * (
-                      M_MgO * (-M_FeO * M_SiO2 + M_FeSiO3 * (-2 * M_FeO + M_SiO2)) + M_MgSiO3 * (
-                      M_FeO * (-2 * M_MgO - M_SiO2) + M_FeSiO3 * (-2 * M_FeO - 2 * M_MgO + M_SiO2)) + M_O * (
-                      M_MgO * (M_FeSiO3 + M_SiO2) + M_MgSiO3 * (M_FeSiO3 + M_SiO2))) + M_Mg * (M_Fe * (
-                      M_FeSiO3 * (-2 * M_FeO - 2 * M_MgO + M_SiO2) + M_MgSiO3 * (
-                      -2 * M_FeO - 2 * M_MgO + M_SiO2) + M_O * (M_FeSiO3 + M_MgSiO3 + M_SiO2) + M_SiO2 * (
-                      -M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 + M_FeSiO3 * (-2 * M_FeO - M_SiO2)) + M_MgSiO3 * (
-                                                                                               M_FeO * (
-                                                                                               -2 * M_MgO + M_SiO2) + M_FeSiO3 * (
-                                                                                               -2 * M_FeO - 2 * M_MgO + M_SiO2)) + M_O * (
-                                                                                               M_MgSiO3 * (
-                                                                                               M_FeO + M_FeSiO3) + M_SiO2 * (
-                                                                                               M_FeO + M_FeSiO3))) + M_O * M_SiO2 * (
-                                                                             M_MgO * (M_FeO + M_FeSiO3) + M_MgSiO3 * (
-                                                                             M_FeO + M_FeSiO3))))) / (M_O * (M_Fe * (
-        M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-        M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-        4 * M_FeO + 4 * M_MgO)) + M_MgO * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (M_FeO * (
-        4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (
-        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-        M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-        M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-        4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                           4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                           -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                           -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                           -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (
-                                                                                        M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                            M_FeO + M_MgO)) + M_MgSiO3 * (
-                                                                                                M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                M_FeO + M_MgO)) + M_O * (
-                                                                                                M_FeSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-                                                                                                -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                                -M_FeO - M_MgO + 9 * M_m) + M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                                M_FeO + M_MgO)) + M_MgO * (
-                                                                                        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        M_FeO * M_m + M_SiO2 * (
-                                                                                        -M_FeO + M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                        M_FeO + M_MgO))) + M_O * (
-                                                                                        M_FeO * (
-                                                                                        4 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_MgO * (
-                                                                                        -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                        -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
-                                                                                        M_MgO * (
-                                                                                        9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        9 * M_FeO * M_m + M_SiO2 * (
-                                                                                        -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        9 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                        9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                                                                                                      M_Fe * (M_MgO * (
-                                                                                                      -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                      -M_FeO * M_m + M_SiO2 * (
-                                                                                                      M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                              M_FeO * (
-                                                                                                              -M_MgO * M_m + M_SiO2 * (
-                                                                                                              M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                              M_SiO2 * (
-                                                                                                              M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                              -M_FeO - M_MgO))) + M_O * (
-                                                                                                              M_MgO * (
-                                                                                                              M_FeSiO3 * (
-                                                                                                              M_FeO - M_m) + M_SiO2 * (
-                                                                                                              M_FeO - M_m)) + M_MgSiO3 * (
-                                                                                                              M_FeSiO3 * (
-                                                                                                              M_FeO + M_MgO - M_m) + M_MgO * (
-                                                                                                              M_FeO - M_m) + M_SiO2 * (
-                                                                                                              M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                                      M_Fe * (
-                                                                                                      M_FeSiO3 * (
-                                                                                                      M_SiO2 * (
-                                                                                                      M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                      -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                                      M_SiO2 * (
-                                                                                                      M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                      -M_FeO - M_MgO)) + M_O * (
-                                                                                                      M_FeSiO3 * (
-                                                                                                      M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                                      M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                                      M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                                      -M_FeO - M_MgO)) + M_MgO * (
-                                                                                                      -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                      -M_FeO * M_m + M_SiO2 * (
-                                                                                                      M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                      M_FeO * (
-                                                                                                      -M_MgO * M_m + M_SiO2 * (
-                                                                                                      M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                      M_SiO2 * (
-                                                                                                      M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                      -M_FeO - M_MgO))) + M_O * (
-                                                                                                      M_FeO * M_SiO2 * (
-                                                                                                      M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                      M_FeO * (
-                                                                                                      M_MgO - M_m) + M_SiO2 * (
-                                                                                                      M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                                      M_FeO * (
-                                                                                                      M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                      M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                                      M_MgO * (
-                                                                                                      -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                      -M_FeO * M_m + M_SiO2 * (
-                                                                                                      M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                      M_FeO * (
-                                                                                                      -M_MgO * M_m + M_SiO2 * (
-                                                                                                      M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                      M_SiO2 * (
-                                                                                                      M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                      -M_FeO - M_MgO)))) + M_Si * (
-                                                                                                      M_Fe * (M_MgO * (
-                                                                                                      -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                      4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                                      M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                              -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                              4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                                              4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                                              M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                                              M_MgO * (
-                                                                                                              M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                              M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                      M_Fe * (
-                                                                                                      M_FeSiO3 * (
-                                                                                                      4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                      4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                      M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                      M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                      -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                      -M_MgO * M_m + M_SiO2 * (
-                                                                                                      M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                      -4 * M_FeO * M_m + M_MgO * (
-                                                                                                      4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                      4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                      M_FeO * (
-                                                                                                      4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                      4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                      M_FeO * (
-                                                                                                      M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                      M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                      M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                      -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                      -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                      4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                      M_FeO * (
-                                                                                                      -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                      4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                      M_SiO2 * (
-                                                                                                      4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                      -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                      M_MgO * (M_FeO * (
-                                                                                                      M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                      M_FeO * (
-                                                                                                      M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                      M_SiO2 - M_m))))))
-
-    def dM_MgSiO3_dTc(self, Moles, dKs):
-        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
-        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_MgSiO3 * (M_Fe * dKFeO_KFeO * (M_Mg * M_O * (4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))) + M_Si * (M_Mg * (
-        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_FeO * (2 * M_SiO2 + 10 * M_m) + M_FeSiO3 * (
-        -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m))) + M_MgO * M_O * (M_FeO * (3 * M_SiO2 + 6 * M_m) + M_FeSiO3 * (
-        -6 * M_SiO2 + 15 * M_m))) + M_c * (M_Mg * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        M_O * (M_FeO + M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_MgO * M_O * (
-                                           -M_FeO * M_SiO2 - M_FeSiO3 * M_m) + M_Si * (M_Mg * (
-        M_FeO * (-M_SiO2 - 3 * M_m) + M_FeSiO3 * (4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-        M_FeO + M_FeSiO3)) + M_MgO * (M_FeO * (-2 * M_SiO2 - 2 * M_m) + M_FeSiO3 * (
-        2 * M_SiO2 - 6 * M_m))))) + M_FeSiO3 * dKFeSiO3_KFeSiO3 * (M_O * (
-        M_Fe * M_FeO * M_MgO * (-4 * M_SiO2 + 4 * M_m) + M_Mg * (
-        M_Fe * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_FeO * M_MgO * (
-        -4 * M_SiO2 + 4 * M_m))) + M_Si * (M_Mg * (M_Fe * (
-        M_O * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-        M_FeO + M_MgO)) + M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_O * (-9 * M_MgO - 6 * M_SiO2 + 15 * M_m))) + M_MgO * (
-                                           M_Fe * (M_FeO * (-M_SiO2 + M_m) + M_O * (
-                                           -9 * M_FeO - 6 * M_SiO2 + 15 * M_m)) + M_FeO * M_O * (
-                                           -9 * M_SiO2 + 9 * M_m))) + M_c * (M_Mg * (
-        M_Fe * (M_O * (M_FeO + M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_FeO * (
-        M_MgO * (M_SiO2 - M_m) + M_O * (M_MgO - M_m))) + M_MgO * (M_Fe * (
-        M_FeO * (M_SiO2 - M_m) + M_O * (M_FeO - M_m)) + M_FeO * M_O * (M_SiO2 - M_m)) + M_Si * (M_Mg * (
-        M_Fe * (4 * M_FeO + 4 * M_MgO + M_O + M_SiO2 - 9 * M_m) + M_FeO * (
-        4 * M_MgO + 2 * M_SiO2 - 6 * M_m)) + M_MgO * (M_Fe * (4 * M_FeO + 2 * M_SiO2 - 6 * M_m) + M_FeO * (
-        4 * M_SiO2 - 4 * M_m))))) + M_Mg * dKMgO_KMgO * (M_Fe * M_O * (-4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO))) + M_Si * (M_Fe * (
-        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_FeSiO3 * (9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m) + M_SiO2 * (M_FeO + 3 * M_MgO - 9 * M_m) + M_m * (
-        -4 * M_FeO + 6 * M_MgO))) + M_O * (M_FeO * (6 * M_MgO * M_m + M_SiO2 * (3 * M_MgO - 9 * M_m)) + M_FeSiO3 * (
-        M_SiO2 * (9 * M_FeO + 3 * M_MgO - 9 * M_m) + M_m * (-9 * M_FeO + 6 * M_MgO)))) + M_c * (M_Fe * (
-        M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_FeSiO3 * (-M_FeO - M_MgO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m))) + M_O * (M_FeO * M_SiO2 * (
-        -M_MgO + M_m) + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO - M_MgO + M_m))) + M_Si * (M_Fe * (
-        M_FeSiO3 * (-4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (-M_FeO - M_FeSiO3 - M_SiO2 + M_m) + M_SiO2 * (
-        -M_FeO - 2 * M_MgO + 4 * M_m) + M_m * (M_FeO - 2 * M_MgO)) + M_FeO * (-2 * M_MgO * M_m + M_SiO2 * (
-        -2 * M_MgO + 4 * M_m)) + M_FeSiO3 * (M_SiO2 * (-4 * M_FeO - 2 * M_MgO + 4 * M_m) + M_m * (
-        4 * M_FeO - 2 * M_MgO)) + M_O * (M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (
-        -M_SiO2 + M_m))))) + M_Si * dKSiO2_KSiO2 * (M_O * (
-        M_Fe * M_MgO * (M_FeO * (-2 * M_SiO2 - 4 * M_m) + M_FeSiO3 * (4 * M_SiO2 - 10 * M_m)) + M_Mg * (
-        M_Fe * (M_SiO2 * (-2 * M_FeO - 2 * M_MgO + 6 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO)) + M_FeO * (
-        -4 * M_MgO * M_m + M_SiO2 * (-2 * M_MgO + 6 * M_m)) + M_FeSiO3 * (
-        M_SiO2 * (-6 * M_FeO - 2 * M_MgO + 6 * M_m) + M_m * (6 * M_FeO - 4 * M_MgO)))) + M_c * (M_Mg * (
-        M_Fe * (M_O * (-M_FeO - M_MgO + M_m) + M_SiO2 * (M_FeO + M_MgO - 2 * M_m) + M_m * (M_FeO + M_MgO)) + M_FeO * (
-        M_MgO * M_m + M_SiO2 * (M_MgO - 2 * M_m)) + M_FeSiO3 * (
-        M_SiO2 * (2 * M_FeO + M_MgO - 2 * M_m) + M_m * (-2 * M_FeO + M_MgO)) + M_O * (
-        M_FeO * (-M_MgO + M_m) + M_FeSiO3 * (-M_MgO + M_m))) + M_MgO * (M_Fe * (
-        M_FeO * (M_SiO2 + M_m) + M_FeSiO3 * (-M_SiO2 + 3 * M_m) + M_O * (-M_FeO - M_FeSiO3 - M_SiO2 + M_m)) + M_O * (
-                                                                        M_FeO * (-M_SiO2 + M_m) + M_FeSiO3 * (
-                                                                        -M_SiO2 + M_m))))) + dKMgSiO3_KMgSiO3 * (M_O * (
-        M_Fe * M_MgO * (
-        -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-4 * M_FeO * M_m + M_SiO2 * (4 * M_FeO - 4 * M_m))) + M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO)) + M_SiO2 * M_m * (
-        -4 * M_FeO - 4 * M_MgO)) + M_MgO * (-4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        -4 * M_FeO * M_m + M_SiO2 * (4 * M_FeO - 4 * M_m))))) + M_Si * (M_Mg * (M_Fe * (
-        M_FeSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_FeSiO3 * (9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m) + M_SiO2 * (M_FeO + M_MgO - 9 * M_m) + M_m * (
-        -4 * M_FeO - 4 * M_MgO)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-        -M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_O * (M_FeO * (
-        -4 * M_MgO * M_m + M_SiO2 * (M_MgO - 9 * M_m)) + M_FeSiO3 * (
-                                                         -9 * M_FeO * M_m + M_MgO * (9 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                         9 * M_FeO + M_MgO - 9 * M_m)))) + M_MgO * (M_Fe * (
-        -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m)) + M_O * (
-        -4 * M_FeO * M_m + M_FeSiO3 * (9 * M_FeO + 4 * M_SiO2 - 25 * M_m) + M_SiO2 * (M_FeO - 9 * M_m))) + M_O * (
-                                                                                                    -9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                    -9 * M_FeO * M_m + M_SiO2 * (
-                                                                                                    9 * M_FeO - 9 * M_m))))) + M_c * (
-                                                                                                                 M_Mg * (
-                                                                                                                 M_Fe * (
-                                                                                                                 M_FeSiO3 * (
-                                                                                                                 M_SiO2 * (
-                                                                                                                 -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                                 M_FeO + M_MgO)) + M_O * (
-                                                                                                                 M_FeSiO3 * (
-                                                                                                                 -M_FeO - M_MgO + M_m) + M_SiO2 * (
-                                                                                                                 -M_FeO - M_MgO + M_m)) + M_SiO2 * M_m * (
-                                                                                                                 M_FeO + M_MgO)) + M_MgO * (
-                                                                                                                 M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                                 M_FeO * M_m + M_SiO2 * (
-                                                                                                                 -M_FeO + M_m))) + M_O * (
-                                                                                                                 M_FeO * M_SiO2 * (
-                                                                                                                 -M_MgO + M_m) + M_FeSiO3 * (
-                                                                                                                 M_FeO * (
-                                                                                                                 -M_MgO + M_m) + M_SiO2 * (
-                                                                                                                 -M_FeO - M_MgO + M_m)))) + M_MgO * (
-                                                                                                                 M_Fe * (
-                                                                                                                 M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                                 M_FeO * M_m + M_SiO2 * (
-                                                                                                                 -M_FeO + M_m)) + M_O * (
-                                                                                                                 M_FeSiO3 * (
-                                                                                                                 -M_FeO + M_m) + M_SiO2 * (
-                                                                                                                 -M_FeO + M_m))) + M_O * (
-                                                                                                                 M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                                 M_FeO * M_m + M_SiO2 * (
-                                                                                                                 -M_FeO + M_m)))) + M_Si * (
-                                                                                                                 M_Mg * (
-                                                                                                                 M_Fe * (
-                                                                                                                 M_FeSiO3 * (
-                                                                                                                 -4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (
-                                                                                                                 -M_FeO - M_FeSiO3 - M_MgO - M_SiO2 + M_m) + M_SiO2 * (
-                                                                                                                 -M_FeO - M_MgO + 4 * M_m) + M_m * (
-                                                                                                                 M_FeO + M_MgO)) + M_FeO * (
-                                                                                                                 M_MgO * M_m + M_SiO2 * (
-                                                                                                                 -M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                                                                                 4 * M_FeO * M_m + M_MgO * (
-                                                                                                                 -4 * M_FeO + M_m) + M_SiO2 * (
-                                                                                                                 -4 * M_FeO - M_MgO + 4 * M_m)) + M_O * (
-                                                                                                                 M_FeO * (
-                                                                                                                 -M_MgO - M_SiO2 + M_m) + M_FeSiO3 * (
-                                                                                                                 -M_MgO - M_SiO2 + M_m))) + M_MgO * (
-                                                                                                                 M_Fe * (
-                                                                                                                 M_FeO * M_m + M_FeSiO3 * (
-                                                                                                                 -4 * M_FeO - M_SiO2 + 9 * M_m) + M_O * (
-                                                                                                                 -M_FeO - M_FeSiO3 - M_SiO2 + M_m) + M_SiO2 * (
-                                                                                                                 -M_FeO + 4 * M_m)) + 4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                                 4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                                 -4 * M_FeO + 4 * M_m)) + M_O * (
-                                                                                                                 M_FeO * (
-                                                                                                                 -M_SiO2 + M_m) + M_FeSiO3 * (
-                                                                                                                 -M_SiO2 + M_m))))))) / (
-               M_O * (M_Fe * (M_MgO * (
-               4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                              M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)))) + M_Mg * (
-                      M_Fe * (M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-                              M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                              4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (4 * M_FeO + 4 * M_MgO)) + M_MgO * (
-                      4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                      4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                      M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                      M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))))) + M_Si * (M_Fe * (
-               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (
-               M_FeO * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO))) + M_O * (M_MgO * (
-               4 * M_FeO * M_m + M_FeSiO3 * (-9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-               -M_FeO + 9 * M_m)) + M_MgSiO3 * (4 * M_FeO * M_m + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (-9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (M_Fe * (
-               M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_MgSiO3 * (
-               M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-               M_FeSiO3 * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO - M_MgO + 9 * M_m) + M_m * (
-               4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (M_FeO + M_MgO)) + M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-               M_FeO * M_m + M_SiO2 * (-M_FeO + M_m))) + M_MgSiO3 * (M_FeO * (
-               M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-               M_FeO + M_MgO))) + M_O * (M_FeO * (4 * M_MgO * M_m + M_SiO2 * (-M_MgO + 9 * M_m)) + M_FeSiO3 * (
-               9 * M_FeO * M_m + M_MgO * (-9 * M_FeO + 4 * M_m) + M_SiO2 * (
-               -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (M_FeO * (-9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-               -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (M_MgO * (
-               9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (9 * M_FeO * M_m + M_SiO2 * (-9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                           M_FeO * (9 * M_MgO * M_m + M_SiO2 * (
-                                                                           -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
+                      M_FeO * (M_SiO2 + 2.0 * M_m) + M_MgO * (M_SiO2 + 2.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_FeO * (
+                      M_MgO * (M_SiO2 + 2.0 * M_m) - 3.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                      M_FeO * (3.0 * M_SiO2 - 3.0 * M_m) + M_MgO * (
+                      M_SiO2 + 2.0 * M_m) - 3.0 * M_SiO2 * M_m))) + M_c * (
+                      M_Fe * M_MgO * (M_FeO * M_SiO2 + M_FeSiO3 * M_m) + M_Mg * (
+                      M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_SiO2 * (M_MgO - M_m)) + M_SiO2 * (
+                      M_Fe * (M_FeO + M_MgO - M_m) + M_FeO * (M_MgO - M_m))) + M_Si * (M_Mg * (
+                      M_Fe * (2.0 * M_FeO + 2.0 * M_MgO + M_SiO2 - 3.0 * M_m) + M_FeO * (
+                      2.0 * M_MgO + M_SiO2 - 3.0 * M_m) + M_FeSiO3 * (2.0 * M_MgO + M_SiO2 - 3.0 * M_m)) + M_MgO * (
+                                                                                       M_Fe * (
+                                                                                       2.0 * M_FeO + 2.0 * M_FeSiO3 + 2.0 * M_SiO2 - 2.0 * M_m) + M_FeO * (
+                                                                                       2.0 * M_SiO2 - 2.0 * M_m) + M_FeSiO3 * (
+                                                                                       2.0 * M_SiO2 - 2.0 * M_m))))) + M_Si * (
+                      M_Fe * (M_MgO * (M_FeO * (
+                      M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                      -2.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+                      -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er + 4.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                  5.0 * dM_FeO_er - 5.0 * dM_MgSiO3_er - 5.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                       3.0 * dM_FeO_er + 3.0 * dM_FeSiO3_er)) + M_MgSiO3 * (M_FeO * (M_MgO * (
+                      -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                     -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                                                     -2.0 * dM_FeSiO3_er + 2.0 * dM_MgO_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                            M_FeO * (
+                                                                                            -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                            -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                            2.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                            5.0 * dM_FeO_er + 5.0 * dM_MgO_er - 5.0 * dM_SiO2_er)) + M_MgO * (
+                                                                                            M_SiO2 * (
+                                                                                            -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er) + M_m * (
+                                                                                            3.0 * dM_FeO_er + 3.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                                                                                            3.0 * dM_FeO_er + 3.0 * dM_FeSiO3_er))) + M_Mg * (
+                      M_Fe * (M_FeO * (
+                      M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                      -2.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_FeSiO3 * (M_FeO * (
+                      -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                  -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                  2.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                  5.0 * dM_FeO_er + 5.0 * dM_MgO_er - 5.0 * dM_SiO2_er)) + M_MgO * (
+                              M_SiO2 * (
+                              -dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                              -2.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_MgSiO3 * (M_FeO * (
+                      -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                                                          -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                                          2.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                          5.0 * dM_FeO_er + 5.0 * dM_MgO_er - 5.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                              3.0 * dM_FeO_er + 3.0 * dM_FeSiO3_er + 3.0 * dM_MgO_er + 3.0 * dM_MgSiO3_er)) + M_FeO * (
+                      M_MgO * (
+                      M_SiO2 * (-dM_FeO_er - 2 * dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                      -2.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                      3.0 * dM_MgO_er + 3.0 * dM_MgSiO3_er)) + M_FeSiO3 * (M_FeO * (M_MgO * (
+                      -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                    -3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_m * (
+                                                                                    3.0 * dM_MgO_er + 3.0 * dM_MgSiO3_er)) + M_MgO * (
                                                                            M_SiO2 * (
-                                                                           -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                           9 * M_FeO + 9 * M_MgO))))) + M_c * (M_Fe * (
-               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (-M_FeO * M_m + M_SiO2 * (M_FeO - M_m))) + M_MgSiO3 * (
-               M_FeO * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_FeSiO3 * (
-               M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_O * (
+                                                                           -dM_FeSiO3_er - dM_MgO_er - 2 * dM_MgSiO3_er - dM_SiO2_er) + M_m * (
+                                                                           2.0 * dM_FeO_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er)) + M_SiO2 * M_m * (
+                                                                           3.0 * dM_MgO_er + 3.0 * dM_MgSiO3_er)) + M_MgSiO3 * (
+                      M_FeO * (M_MgO * (
+                      -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                               2.0 * dM_FeO_er + 4.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                               -5.0 * dM_FeSiO3_er + 5.0 * dM_MgO_er - 5.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                      M_FeO * (-3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_MgO * (
+                      -3.0 * dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 3.0 * dM_MgSiO3_er) + M_SiO2 * (
+                      2.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er) + M_m * (
+                      5.0 * dM_FeO_er + 5.0 * dM_MgO_er - 5.0 * dM_SiO2_er)))) + dKSiO2_KSiO2 * (M_Fe * (M_MgO * (
+                      2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                      M_FeO * (-2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+                      M_MgO * (-2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+                      -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                              -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m))) + M_Mg * (
+                                                                                                 M_Fe * (M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                                         M_FeO * (
+                                                                                                         -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                                         -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                         2.0 * M_FeO + 2.0 * M_MgO)) + M_MgO * (
+                                                                                                 2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (M_MgO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + M_MgO * (
+                                                                                                 -2.0 * M_SiO2 + 2.0 * M_m) + 2.0 * M_SiO2 * M_m))) + M_c * (
+                                                                                                 M_Fe * (M_MgO * (
+                                                                                                 M_FeSiO3 * (
+                                                                                                 2.0 * M_FeO - 3.0 * M_m) + M_SiO2 * (
+                                                                                                 M_FeO - 2.0 * M_m)) + M_MgSiO3 * (
+                                                                                                         M_FeO * (
+                                                                                                         2.0 * M_MgO + M_SiO2) + M_FeSiO3 * (
+                                                                                                         2.0 * M_FeO + 2.0 * M_MgO - 3.0 * M_m) + M_MgO * (
+                                                                                                         2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_Mg * (
+                                                                                                 M_Fe * (M_FeSiO3 * (
+                                                                                                 2.0 * M_FeO + 2.0 * M_MgO - 3.0 * M_m) + M_MgSiO3 * (
+                                                                                                         2.0 * M_FeO + 2.0 * M_MgO - 3.0 * M_m) + M_SiO2 * (
+                                                                                                         M_FeO + M_MgO - 2.0 * M_m)) + M_FeO * M_SiO2 * (
+                                                                                                 M_MgO - 2.0 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 2.0 * M_MgO + 2.0 * M_SiO2 - 2.0 * M_m) + M_SiO2 * (
+                                                                                                 M_MgO - 2.0 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 2.0 * M_MgO - 3.0 * M_m) + M_FeSiO3 * (
+                                                                                                 2.0 * M_FeO + 2.0 * M_MgO - 3.0 * M_m))) + M_MgO * (
+                                                                                                 -2.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                                 M_FeO * (M_MgO * (
+                                                                                                 2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                                 M_FeO * (
+                                                                                                 2.0 * M_SiO2 - 2.0 * M_m) + M_MgO * (
+                                                                                                 2.0 * M_SiO2 - 2.0 * M_m) - 2.0 * M_SiO2 * M_m))))) + M_c * (
+                      M_Fe * (M_MgO * (M_FeSiO3 * (
+                      M_FeO * (-dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                      dM_FeO_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_SiO2 * (M_FeO * (
+                      -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                      dM_FeO_er + 1.0 * dM_FeSiO3_er))) + M_MgSiO3 * (
+                              M_FeO * (
+                              M_MgO * (-dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                              -dM_FeO_er - 2.0 * dM_FeSiO3_er - 1.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                              M_FeO * (-dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                              -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                              dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgO * (
+                              M_SiO2 * (-dM_FeO_er - 1.0 * dM_FeSiO3_er) + M_m * (
+                              dM_FeO_er + 1.0 * dM_FeSiO3_er)) + M_SiO2 * M_m * (
+                              dM_FeO_er + 1.0 * dM_FeSiO3_er))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+                      M_FeO * (-dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                      -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                      dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_MgSiO3 * (M_FeO * (
+                      -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                               -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                               dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_SiO2 * (
+                                                                                  M_FeO * (
+                                                                                  -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_MgO * (
+                                                                                  -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                                  dM_FeO_er + 1.0 * dM_FeSiO3_er + dM_MgO_er + 1.0 * dM_MgSiO3_er))) + M_FeO * M_SiO2 * (
+                                                                          M_MgO * (
+                                                                          -dM_FeO_er - 2.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                          dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_FeSiO3 * (
+                                                                          M_FeO * (M_MgO * (
+                                                                          -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_SiO2 * (
+                                                                                   -dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                   dM_MgO_er + 1.0 * dM_MgSiO3_er)) + M_SiO2 * (
+                                                                          M_MgO * (
+                                                                          -1.0 * dM_FeSiO3_er - dM_MgO_er - 2.0 * dM_MgSiO3_er - 1.0 * dM_SiO2_er) + M_m * (
+                                                                          dM_MgO_er + 1.0 * dM_MgSiO3_er))) + M_MgSiO3 * (
+                                                                          M_FeO * (M_MgO * (
+                                                                          -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                                   -1.0 * dM_FeSiO3_er + dM_MgO_er - 1.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                          M_FeO * (
+                                                                          -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_MgO * (
+                                                                          -dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 1.0 * dM_MgSiO3_er) + M_m * (
+                                                                          dM_FeO_er + dM_MgO_er - 1.0 * dM_SiO2_er)))) + M_Si * (
+                      M_Fe * (M_MgO * (M_FeO * (
+                      -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                       -dM_FeO_er - 3.0 * dM_FeSiO3_er - 3.0 * dM_MgO_er - 5.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_SiO2 * (
+                                       -dM_FeO_er - 3.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                       dM_FeO_er + 3.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                              M_FeO * (
+                              -dM_FeO_er - 3.0 * dM_FeSiO3_er + 1.0 * dM_MgO_er - 1.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                              -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_SiO2 * (
+                              -dM_FeO_er - 3.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                              dM_FeO_er + 3.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er + 2.0 * dM_SiO2_er))) + M_Mg * (M_Fe * (
+                      M_FeO * (
+                      -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                      -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_MgO * (
+                      -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_MgSiO3 * (
+                      -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_SiO2 * (
+                      -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                      dM_FeO_er + 3.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_FeO * (
+                                                                                                               M_MgO * (
+                                                                                                               -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                               -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                               2.0 * dM_FeSiO3_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                                                                                                               M_MgO * (
+                                                                                                               1.0 * dM_FeO_er - 1.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_SiO2 * (
+                                                                                                               -2.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                                               -2.0 * dM_FeO_er + dM_MgO_er + 3.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_MgSiO3 * (
+                                                                                                               M_FeO * (
+                                                                                                               -3.0 * dM_FeO_er - 5.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_FeSiO3 * (
+                                                                                                               -dM_FeO_er - 3.0 * dM_FeSiO3_er - dM_MgO_er - 3.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er))) + M_MgO * (
+                      M_FeO * (M_SiO2 * (
+                      -2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                               2.0 * dM_FeSiO3_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er)) + M_FeSiO3 * (
+                      M_SiO2 * (-2.0 * dM_FeSiO3_er - 2 * dM_MgO_er - 4.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                      -2.0 * dM_FeO_er + 2.0 * dM_MgSiO3_er + 2.0 * dM_SiO2_er))) + M_MgSiO3 * (M_FeO * (
+                      M_SiO2 * (-2 * dM_FeO_er - 4.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                      2.0 * dM_FeSiO3_er - 2.0 * dM_MgO_er + 2.0 * dM_SiO2_er)) + M_FeSiO3 * (M_SiO2 * (
+                      -2.0 * dM_FeSiO3_er - 2.0 * dM_MgSiO3_er - 2.0 * dM_SiO2_er) + M_m * (
+                                                                                              -2.0 * dM_FeO_er - 2.0 * dM_MgO_er + 2.0 * dM_SiO2_er)))))) / (
+               M_O * (M_Fe * (M_MgO * (4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                              M_FeO * (M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                              M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                              -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m))) + M_Mg * (M_Fe * (M_FeSiO3 * (
+               M_FeO * (-4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (-4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO)) + M_MgO * (
+                                                                                           4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + M_MgO * (
+                                                                                           -4.0 * M_SiO2 + 4.0 * M_m) + 4.0 * M_SiO2 * M_m)))) + M_Si * (
+               M_Fe * (
+               M_MgO * (M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (M_MgO * (
+               M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               -9.0 * M_MgO - M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                                                                                             -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                                                                                             -9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m))) + M_Mg * (
+               M_Fe * (M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_O * (
+                       M_FeO * (-M_SiO2 + 4.0 * M_m) + M_FeSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_MgO * (
+                       -M_SiO2 + 4.0 * M_m) + M_MgSiO3 * (
+                       -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_SiO2 * M_m * (
+                       M_FeO + M_MgO)) + M_MgO * (
+               M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-M_SiO2 + M_m) + M_MgO * (-M_SiO2 + M_m) + M_SiO2 * M_m)) + M_O * (
+               M_FeO * (M_MgO * (-M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (
+               -M_SiO2 + 4.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (-9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m) + M_FeSiO3 * (
+               -9.0 * M_FeO - 9.0 * M_MgO - 4.0 * M_SiO2 + 25.0 * M_m)))) + M_O * (M_MgO * (
+               9.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)) + M_MgSiO3 * (M_FeO * (
+               M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m) + M_FeSiO3 * (M_FeO * (
+               -9.0 * M_SiO2 + 9.0 * M_m) + M_MgO * (-9.0 * M_SiO2 + 9.0 * M_m) + 9.0 * M_SiO2 * M_m)))) + M_c * (
+               M_Fe * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
                M_MgO * (M_FeSiO3 * (M_FeO - M_m) + M_SiO2 * (M_FeO - M_m)) + M_MgSiO3 * (
-               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (M_FeO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_O * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO))) + M_O * (
-                                                                                                               M_FeO * M_SiO2 * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO - M_m) + M_FeSiO3 * (
-                                                                                                               M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -M_FeO * M_m + M_SiO2 * (
-                                                                                                               M_FeO - M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)))) + M_Si * (
-                                                                                                               M_Fe * (
-                                                                                                               M_MgO * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               -M_FeO * M_m + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                                               4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                                               M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                                               M_Fe * (
-                                                                                                               M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                                               M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                                               M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -M_FeO - M_MgO)) + M_FeO * (
-                                                                                                               -M_MgO * M_m + M_SiO2 * (
-                                                                                                               M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_MgO * (
-                                                                                                               4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                                               4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                                               M_FeO * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                                               M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                                               -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                                               -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                                               4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               -4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                               4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                                               M_SiO2 * (
-                                                                                                               4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                                               -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                                               M_MgO * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                                               M_FeO * (
-                                                                                                               M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                                               M_SiO2 - M_m))))))
-
-    def dM_FeSiO3_dTc(self, Moles, dKs):
-        M_Mg, M_Si, M_Fe, M_O, M_c, M_MgO, M_SiO2, M_FeO, M_MgSiO3, M_FeSiO3, M_m = Moles
-        dKMgO_KMgO, dKSiO2_KSiO2, dKFeO_KFeO, dKMgSiO3_KMgSiO3, dKFeSiO3_KFeSiO3 = dKs
-        return M_FeSiO3 * (M_Fe * dKFeO_KFeO * (M_Mg * M_O * (-4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO))) + M_Si * (M_Mg * (
-        -M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_MgSiO3 * (9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m) + M_SiO2 * (3 * M_FeO + M_MgO - 9 * M_m) + M_m * (
-        6 * M_FeO - 4 * M_MgO))) + M_O * (M_MgO * (6 * M_FeO * M_m + M_SiO2 * (3 * M_FeO - 9 * M_m)) + M_MgSiO3 * (
-        M_SiO2 * (3 * M_FeO + 9 * M_MgO - 9 * M_m) + M_m * (6 * M_FeO - 9 * M_MgO)))) + M_c * (M_Mg * (
-        M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_MgSiO3 * (-M_FeO - M_MgO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m))) + M_O * (M_MgO * M_SiO2 * (
-        -M_FeO + M_m) + M_MgSiO3 * (M_MgO * M_m + M_SiO2 * (-M_FeO - M_MgO + M_m))) + M_Si * (M_Mg * (
-        M_MgSiO3 * (-4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (-M_MgO - M_MgSiO3 - M_SiO2 + M_m) + M_SiO2 * (
-        -2 * M_FeO - M_MgO + 4 * M_m) + M_m * (-2 * M_FeO + M_MgO)) + M_MgO * (-2 * M_FeO * M_m + M_SiO2 * (
-        -2 * M_FeO + 4 * M_m)) + M_MgSiO3 * (M_SiO2 * (-2 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-        -2 * M_FeO + 4 * M_MgO)) + M_O * (M_MgO * (-M_SiO2 + M_m) + M_MgSiO3 * (
-        -M_SiO2 + M_m))))) + M_Mg * dKMgO_KMgO * (M_Fe * M_O * (4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO))) + M_Si * (M_Fe * (
-        M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_MgO * (2 * M_SiO2 + 10 * M_m) + M_MgSiO3 * (
-        -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m))) + M_FeO * M_O * (M_MgO * (3 * M_SiO2 + 6 * M_m) + M_MgSiO3 * (
-        -6 * M_SiO2 + 15 * M_m))) + M_c * (M_Fe * (-M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        M_O * (M_FeO + M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO))) + M_FeO * M_O * (
-                                           -M_MgO * M_SiO2 - M_MgSiO3 * M_m) + M_Si * (M_Fe * (
-        M_MgO * (-M_SiO2 - 3 * M_m) + M_MgSiO3 * (4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-        M_MgO + M_MgSiO3)) + M_FeO * (M_MgO * (-2 * M_SiO2 - 2 * M_m) + M_MgSiO3 * (
-        2 * M_SiO2 - 6 * M_m))))) + M_MgSiO3 * dKMgSiO3_KMgSiO3 * (M_O * (
-        M_Fe * M_FeO * M_MgO * (-4 * M_SiO2 + 4 * M_m) + M_Mg * (
-        M_Fe * (M_SiO2 * (-4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (4 * M_FeO + 4 * M_MgO)) + M_FeO * M_MgO * (
-        -4 * M_SiO2 + 4 * M_m))) + M_Si * (M_Mg * (M_Fe * (
-        M_O * (-9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (
-        M_FeO + M_MgO)) + M_FeO * (M_MgO * (-M_SiO2 + M_m) + M_O * (-9 * M_MgO - 6 * M_SiO2 + 15 * M_m))) + M_MgO * (
-                                           M_Fe * (M_FeO * (-M_SiO2 + M_m) + M_O * (
-                                           -9 * M_FeO - 6 * M_SiO2 + 15 * M_m)) + M_FeO * M_O * (
-                                           -9 * M_SiO2 + 9 * M_m))) + M_c * (M_Mg * (
-        M_Fe * (M_O * (M_FeO + M_MgO - M_m) + M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_FeO * (
-        M_MgO * (M_SiO2 - M_m) + M_O * (M_MgO - M_m))) + M_MgO * (M_Fe * (
-        M_FeO * (M_SiO2 - M_m) + M_O * (M_FeO - M_m)) + M_FeO * M_O * (M_SiO2 - M_m)) + M_Si * (M_Mg * (
-        M_Fe * (4 * M_FeO + 4 * M_MgO + M_O + M_SiO2 - 9 * M_m) + M_FeO * (
-        4 * M_MgO + 2 * M_SiO2 - 6 * M_m)) + M_MgO * (M_Fe * (4 * M_FeO + 2 * M_SiO2 - 6 * M_m) + M_FeO * (
-        4 * M_SiO2 - 4 * M_m))))) + M_Si * dKSiO2_KSiO2 * (M_O * (M_Fe * (
-        M_MgO * (-4 * M_FeO * M_m + M_SiO2 * (-2 * M_FeO + 6 * M_m)) + M_MgSiO3 * (
-        M_SiO2 * (-2 * M_FeO - 6 * M_MgO + 6 * M_m) + M_m * (-4 * M_FeO + 6 * M_MgO))) + M_Mg * (M_Fe * (
-        M_SiO2 * (-2 * M_FeO - 2 * M_MgO + 6 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO)) + M_FeO * (M_MgO * (
-        -2 * M_SiO2 - 4 * M_m) + M_MgSiO3 * (4 * M_SiO2 - 10 * M_m)))) + M_c * (M_Fe * (
-        M_MgO * (M_FeO * M_m + M_SiO2 * (M_FeO - 2 * M_m)) + M_MgSiO3 * (
-        M_SiO2 * (M_FeO + 2 * M_MgO - 2 * M_m) + M_m * (M_FeO - 2 * M_MgO)) + M_O * (
-        M_MgO * (-M_FeO + M_m) + M_MgSiO3 * (-M_FeO + M_m))) + M_FeO * M_O * (M_MgO * (-M_SiO2 + M_m) + M_MgSiO3 * (
-        -M_SiO2 + M_m)) + M_Mg * (M_Fe * (
-        M_O * (-M_FeO - M_MgO + M_m) + M_SiO2 * (M_FeO + M_MgO - 2 * M_m) + M_m * (M_FeO + M_MgO)) + M_FeO * (
-                                  M_MgO * (M_SiO2 + M_m) + M_MgSiO3 * (-M_SiO2 + 3 * M_m) + M_O * (
-                                  -M_MgO - M_MgSiO3 - M_SiO2 + M_m))))) + dKFeSiO3_KFeSiO3 * (M_O * (M_Fe * M_FeO * (
-        -4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (-4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m))) + M_Mg * (M_Fe * (
-        M_MgSiO3 * (M_SiO2 * (4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (-4 * M_FeO - 4 * M_MgO)) + M_SiO2 * M_m * (
-        -4 * M_FeO - 4 * M_MgO)) + M_FeO * (-4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        -4 * M_MgO * M_m + M_SiO2 * (4 * M_MgO - 4 * M_m))))) + M_Si * (M_Fe * (
-        M_FeO * (-M_MgO * M_SiO2 * M_m + M_MgSiO3 * (-M_MgO * M_m + M_SiO2 * (M_MgO - M_m))) + M_O * (
-        M_MgO * (-4 * M_FeO * M_m + M_SiO2 * (M_FeO - 9 * M_m)) + M_MgSiO3 * (
-        -4 * M_FeO * M_m + M_MgO * (9 * M_FeO - 9 * M_m) + M_SiO2 * (M_FeO + 9 * M_MgO - 9 * M_m)))) + M_FeO * M_O * (
-                                                                        -9 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-                                                                        -9 * M_MgO * M_m + M_SiO2 * (
-                                                                        9 * M_MgO - 9 * M_m))) + M_Mg * (M_Fe * (
-        M_MgSiO3 * (M_SiO2 * (M_FeO + M_MgO - M_m) + M_m * (-M_FeO - M_MgO)) + M_O * (
-        M_MgSiO3 * (9 * M_FeO + 9 * M_MgO + 4 * M_SiO2 - 25 * M_m) + M_SiO2 * (M_FeO + M_MgO - 9 * M_m) + M_m * (
-        -4 * M_FeO - 4 * M_MgO)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_FeO * (-M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        -M_MgO * M_m + M_SiO2 * (M_MgO - M_m)) + M_O * (-4 * M_MgO * M_m + M_MgSiO3 * (
-        9 * M_MgO + 4 * M_SiO2 - 25 * M_m) + M_SiO2 * (M_MgO - 9 * M_m))))) + M_c * (M_Fe * (
-        M_FeO * (M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m))) + M_O * (
-        M_MgO * M_SiO2 * (-M_FeO + M_m) + M_MgSiO3 * (
-        M_MgO * (-M_FeO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m)))) + M_FeO * M_O * (M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-        M_MgO * M_m + M_SiO2 * (-M_MgO + M_m))) + M_Mg * (M_Fe * (
-        M_MgSiO3 * (M_SiO2 * (-M_FeO - M_MgO + M_m) + M_m * (M_FeO + M_MgO)) + M_O * (
-        M_MgSiO3 * (-M_FeO - M_MgO + M_m) + M_SiO2 * (-M_FeO - M_MgO + M_m)) + M_SiO2 * M_m * (
-        M_FeO + M_MgO)) + M_FeO * (M_MgO * M_SiO2 * M_m + M_MgSiO3 * (M_MgO * M_m + M_SiO2 * (-M_MgO + M_m)) + M_O * (
-        M_MgSiO3 * (-M_MgO + M_m) + M_SiO2 * (-M_MgO + M_m)))) + M_Si * (M_Fe * (
-        M_MgO * (M_FeO * M_m + M_SiO2 * (-M_FeO + 4 * M_m)) + M_MgSiO3 * (
-        M_FeO * M_m + M_MgO * (-4 * M_FeO + 4 * M_m) + M_SiO2 * (-M_FeO - 4 * M_MgO + 4 * M_m)) + M_O * (
-        M_MgO * (-M_FeO - M_SiO2 + M_m) + M_MgSiO3 * (-M_FeO - M_SiO2 + M_m))) + M_FeO * (
-                                                                         4 * M_MgO * M_SiO2 * M_m + M_MgSiO3 * (
-                                                                         4 * M_MgO * M_m + M_SiO2 * (
-                                                                         -4 * M_MgO + 4 * M_m)) + M_O * (
-                                                                         M_MgO * (-M_SiO2 + M_m) + M_MgSiO3 * (
-                                                                         -M_SiO2 + M_m))) + M_Mg * (M_Fe * (
-        M_MgSiO3 * (-4 * M_FeO - 4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (
-        -M_FeO - M_MgO - M_MgSiO3 - M_SiO2 + M_m) + M_SiO2 * (-M_FeO - M_MgO + 4 * M_m) + M_m * (
-        M_FeO + M_MgO)) + M_FeO * (M_MgO * M_m + M_MgSiO3 * (-4 * M_MgO - M_SiO2 + 9 * M_m) + M_O * (
-        -M_MgO - M_MgSiO3 - M_SiO2 + M_m) + M_SiO2 * (-M_MgO + 4 * M_m))))))) / (M_O * (M_Fe * (M_MgO * (
-        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (4 * M_FeO * M_m + M_SiO2 * (-4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                                                                M_FeO * (
-                                                                                                4 * M_MgO * M_m + M_SiO2 * (
-                                                                                                -4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                                                                M_SiO2 * (
-                                                                                                -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)))) + M_Mg * (
-                                                                                        M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                                            4 * M_FeO + 4 * M_MgO)) + M_MgSiO3 * (
-                                                                                                M_SiO2 * (
-                                                                                                -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                                4 * M_FeO + 4 * M_MgO)) + M_MgO * (
-                                                                                        4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                        4 * M_FeO * M_m + M_SiO2 * (
-                                                                                        -4 * M_FeO + 4 * M_m))) + M_MgSiO3 * (
-                                                                                        M_FeO * (
-                                                                                        4 * M_MgO * M_m + M_SiO2 * (
-                                                                                        -4 * M_MgO + 4 * M_m)) + M_FeSiO3 * (
-                                                                                        M_SiO2 * (
-                                                                                        -4 * M_FeO - 4 * M_MgO + 4 * M_m) + M_m * (
-                                                                                        4 * M_FeO + 4 * M_MgO))))) + M_Si * (
-                                                                                 M_Fe * (M_MgO * (
-                                                                                 M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                 M_FeO * M_m + M_SiO2 * (
-                                                                                 -M_FeO + M_m))) + M_MgSiO3 * (M_FeO * (
-                                                                                 M_MgO * M_m + M_SiO2 * (
-                                                                                 -M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                                                                 -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                              M_FeO + M_MgO))) + M_O * (
-                                                                                         M_MgO * (
-                                                                                         4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                                         -9 * M_FeO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                         -M_FeO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                         4 * M_FeO * M_m + M_FeSiO3 * (
-                                                                                         -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgO * (
-                                                                                         -9 * M_FeO + 9 * M_m) + M_SiO2 * (
-                                                                                         -M_FeO - 9 * M_MgO + 9 * M_m)))) + M_Mg * (
-                                                                                 M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                 -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                     M_FeO + M_MgO)) + M_MgSiO3 * (
-                                                                                         M_SiO2 * (
-                                                                                         -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                         M_FeO + M_MgO)) + M_O * (
-                                                                                         M_FeSiO3 * (
-                                                                                         -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_MgSiO3 * (
-                                                                                         -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_SiO2 * (
-                                                                                         -M_FeO - M_MgO + 9 * M_m) + M_m * (
-                                                                                         4 * M_FeO + 4 * M_MgO)) + M_SiO2 * M_m * (
-                                                                                         M_FeO + M_MgO)) + M_MgO * (
-                                                                                 M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                 M_FeO * M_m + M_SiO2 * (
-                                                                                 -M_FeO + M_m))) + M_MgSiO3 * (M_FeO * (
-                                                                                 M_MgO * M_m + M_SiO2 * (
-                                                                                 -M_MgO + M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                                                                 -M_FeO - M_MgO + M_m) + M_m * (
-                                                                                                              M_FeO + M_MgO))) + M_O * (
-                                                                                 M_FeO * (4 * M_MgO * M_m + M_SiO2 * (
-                                                                                 -M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                 9 * M_FeO * M_m + M_MgO * (
-                                                                                 -9 * M_FeO + 4 * M_m) + M_SiO2 * (
-                                                                                 -9 * M_FeO - M_MgO + 9 * M_m)) + M_MgSiO3 * (
-                                                                                 M_FeO * (
-                                                                                 -9 * M_MgO - 4 * M_SiO2 + 25 * M_m) + M_FeSiO3 * (
-                                                                                 -9 * M_FeO - 9 * M_MgO - 4 * M_SiO2 + 25 * M_m)))) + M_O * (
-                                                                                 M_MgO * (
-                                                                                 9 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                 9 * M_FeO * M_m + M_SiO2 * (
-                                                                                 -9 * M_FeO + 9 * M_m))) + M_MgSiO3 * (
-                                                                                 M_FeO * (9 * M_MgO * M_m + M_SiO2 * (
-                                                                                 -9 * M_MgO + 9 * M_m)) + M_FeSiO3 * (
-                                                                                 M_SiO2 * (
-                                                                                 -9 * M_FeO - 9 * M_MgO + 9 * M_m) + M_m * (
-                                                                                 9 * M_FeO + 9 * M_MgO))))) + M_c * (
-                                                                                 M_Fe * (M_MgO * (
-                                                                                 -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                 -M_FeO * M_m + M_SiO2 * (
-                                                                                 M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-                                                                                 -M_MgO * M_m + M_SiO2 * (
-                                                                                 M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                                                                 M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                             -M_FeO - M_MgO))) + M_O * (
-                                                                                         M_MgO * (M_FeSiO3 * (
-                                                                                         M_FeO - M_m) + M_SiO2 * (
-                                                                                                  M_FeO - M_m)) + M_MgSiO3 * (
-                                                                                         M_FeSiO3 * (
-                                                                                         M_FeO + M_MgO - M_m) + M_MgO * (
-                                                                                         M_FeO - M_m) + M_SiO2 * (
-                                                                                         M_FeO + M_MgO - M_m)))) + M_Mg * (
-                                                                                 M_Fe * (M_FeSiO3 * (M_SiO2 * (
-                                                                                 M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                     -M_FeO - M_MgO)) + M_MgSiO3 * (
-                                                                                         M_SiO2 * (
-                                                                                         M_FeO + M_MgO - M_m) + M_m * (
-                                                                                         -M_FeO - M_MgO)) + M_O * (
-                                                                                         M_FeSiO3 * (
-                                                                                         M_FeO + M_MgO - M_m) + M_MgSiO3 * (
-                                                                                         M_FeO + M_MgO - M_m) + M_SiO2 * (
-                                                                                         M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (
-                                                                                         -M_FeO - M_MgO)) + M_MgO * (
-                                                                                 -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                 -M_FeO * M_m + M_SiO2 * (
-                                                                                 M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-                                                                                 -M_MgO * M_m + M_SiO2 * (
-                                                                                 M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                                                                 M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                             -M_FeO - M_MgO))) + M_O * (
-                                                                                 M_FeO * M_SiO2 * (
-                                                                                 M_MgO - M_m) + M_FeSiO3 * (
-                                                                                 M_FeO * (M_MgO - M_m) + M_SiO2 * (
-                                                                                 M_FeO + M_MgO - M_m)) + M_MgSiO3 * (
-                                                                                 M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
-                                                                                 M_FeO + M_MgO - M_m)))) + M_O * (
-                                                                                 M_MgO * (
-                                                                                 -M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                 -M_FeO * M_m + M_SiO2 * (
-                                                                                 M_FeO - M_m))) + M_MgSiO3 * (M_FeO * (
-                                                                                 -M_MgO * M_m + M_SiO2 * (
-                                                                                 M_MgO - M_m)) + M_FeSiO3 * (M_SiO2 * (
-                                                                                 M_FeO + M_MgO - M_m) + M_m * (
-                                                                                                             -M_FeO - M_MgO)))) + M_Si * (
-                                                                                 M_Fe * (M_MgO * (
-                                                                                 -M_FeO * M_m + M_FeSiO3 * (
-                                                                                 4 * M_FeO + M_SiO2 - 9 * M_m) + M_SiO2 * (
-                                                                                 M_FeO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                         -M_FeO * M_m + M_FeSiO3 * (
-                                                                                         4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgO * (
-                                                                                         4 * M_FeO - 4 * M_m) + M_SiO2 * (
-                                                                                         M_FeO + 4 * M_MgO - 4 * M_m)) + M_O * (
-                                                                                         M_MgO * (
-                                                                                         M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                         M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
-                                                                                 M_Fe * (M_FeSiO3 * (
-                                                                                 4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_MgSiO3 * (
-                                                                                         4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m) + M_O * (
-                                                                                         M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) + M_SiO2 * (
-                                                                                         M_FeO + M_MgO - 4 * M_m) + M_m * (
-                                                                                         -M_FeO - M_MgO)) + M_FeO * (
-                                                                                 -M_MgO * M_m + M_SiO2 * (
-                                                                                 M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                 -4 * M_FeO * M_m + M_MgO * (
-                                                                                 4 * M_FeO - M_m) + M_SiO2 * (
-                                                                                 4 * M_FeO + M_MgO - 4 * M_m)) + M_MgSiO3 * (
-                                                                                 M_FeO * (
-                                                                                 4 * M_MgO + M_SiO2 - 9 * M_m) + M_FeSiO3 * (
-                                                                                 4 * M_FeO + 4 * M_MgO + M_SiO2 - 9 * M_m)) + M_O * (
-                                                                                 M_FeO * (
-                                                                                 M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                 M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
-                                                                                 M_FeO + M_FeSiO3))) + M_MgO * (
-                                                                                 -4 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
-                                                                                 -4 * M_FeO * M_m + M_SiO2 * (
-                                                                                 4 * M_FeO - 4 * M_m))) + M_MgSiO3 * (
-                                                                                 M_FeO * (-4 * M_MgO * M_m + M_SiO2 * (
-                                                                                 4 * M_MgO - 4 * M_m)) + M_FeSiO3 * (
-                                                                                 M_SiO2 * (
-                                                                                 4 * M_FeO + 4 * M_MgO - 4 * M_m) + M_m * (
-                                                                                 -4 * M_FeO - 4 * M_MgO))) + M_O * (
-                                                                                 M_MgO * (
-                                                                                 M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                 M_SiO2 - M_m)) + M_MgSiO3 * (
-                                                                                 M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
-                                                                                 M_SiO2 - M_m))))))
+               M_FeO * (M_MgO + M_SiO2) + M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgO * (
+               M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Mg * (M_Fe * (
+               M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_MgSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_O * (
+               M_FeSiO3 * (M_FeO + M_MgO - M_m) + M_MgSiO3 * (M_FeO + M_MgO - M_m) + M_SiO2 * (
+               M_FeO + M_MgO - M_m)) + M_SiO2 * M_m * (-M_FeO - M_MgO)) + M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_SiO2 - M_m) + M_MgO * (
+                                                         M_SiO2 - M_m) - M_SiO2 * M_m)) + M_O * (
+                                                         M_FeO * M_SiO2 * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO * (M_MgO + M_SiO2 - M_m) + M_SiO2 * (
+                                                         M_MgO - M_m)) + M_MgSiO3 * (
+                                                         M_FeO * (M_MgO - M_m) + M_FeSiO3 * (
+                                                         M_FeO + M_MgO - M_m)))) + M_O * (
+               M_MgO * (-M_FeO * M_SiO2 * M_m + M_FeSiO3 * (M_FeO * (M_SiO2 - M_m) - M_SiO2 * M_m)) + M_MgSiO3 * (
+               M_FeO * (M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m) + M_FeSiO3 * (
+               M_FeO * (M_SiO2 - M_m) + M_MgO * (M_SiO2 - M_m) - M_SiO2 * M_m))) + M_Si * (M_Fe * (M_MgO * (
+               M_FeO * (M_SiO2 - M_m) + M_FeSiO3 * (
+               4.0 * M_FeO + M_SiO2 - 9.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (M_FeO * (
+               4.0 * M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                     4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_O * (
+                                                                                                   M_MgO * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   M_FeO + M_FeSiO3 + M_SiO2 - M_m))) + M_Mg * (
+                                                                                           M_Fe * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_MgO * (
+                                                                                                   M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                                   4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_O * (
+                                                                                                   M_FeO + M_FeSiO3 + M_MgO + M_MgSiO3 + M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeO * (
+                                                                                           M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + 4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           M_SiO2 - M_m) - 4.0 * M_SiO2 * M_m) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_MgO + M_SiO2 - 9.0 * M_m) + M_FeSiO3 * (
+                                                                                           4.0 * M_FeO + 4.0 * M_MgO + M_SiO2 - 9.0 * M_m)) + M_O * (
+                                                                                           M_FeO * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_MgO + M_SiO2 - M_m) + M_MgSiO3 * (
+                                                                                           M_FeO + M_FeSiO3))) + M_MgO * (
+                                                                                           -4.0 * M_FeO * M_SiO2 * M_m + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m) + M_FeSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) + M_MgO * (
+                                                                                           4.0 * M_SiO2 - 4.0 * M_m) - 4.0 * M_SiO2 * M_m)) + M_O * (
+                                                                                           M_MgO * (M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                                    M_SiO2 - M_m)) + M_MgSiO3 * (
+                                                                                           M_FeO * (
+                                                                                           M_SiO2 - M_m) + M_FeSiO3 * (
+                                                                                           M_SiO2 - M_m))))))
 
     def dM_m_dTc_dMi(self, dM_im_dTc):
         '''alternate way to compute dM_m given the results of the mole changes of all mantle components
@@ -3479,5 +5590,3 @@ class MgO_Layer():
 
     def dXOdt(self, XMg, XO, C, T_cmb, dTcmbdt):
         return self.dXMgdt(XMg, XO, C, T_cmb, dTcmbdt)
-
-
