@@ -27,9 +27,9 @@ class Stevenson_1983(Parameters) :
         self.mantle.Q_0 = 1.7e-7 # - [W/m^3] from self Table I
         self.mantle.lam = 1.38e-17 # - [1/s] from self Table I
         # self.mantle.A = 5.2e4 # - [K] from self Table I
-        self.mantle.A = 2.8e4 # - [K] guess
+        self.mantle.A = 2e4 # - [K] guess
         # self.mantle.nu_0 = 4.0e3 # - [m^2/s] from self Table I
-        self.mantle.nu_0 = 12e8 # - [m^2/s] guess
+        self.mantle.nu_0 = 5e10 # - [m^2/s] guess
         self.mantle.Ra_crit = 5e2 # - [] from self Table I
         self.mantle.beta = 0.3 # - [] from self Table I
         self.mantle.g = self.g # - [m/s^2] from self Table II
@@ -225,4 +225,13 @@ class Nimmo_2015(Parameters):
         self.h_0 = 1.e-31 # - [W/kg] similar to Stevenson Table I
         self.lam = 1.38e-17 # - [1/s] from Stevenson Table I
 
-        self.alpha_m = 1.12 # - [] from O'Rourke and Stevenson 2015
+        # self.alpha_m = 1.12 # - [] from O'Rourke and Stevenson 2016 Power Earth's...
+        self.alpha_m = 0.8 # - [] from O'Rourke, Korenaga, and Stevenson 2016 Thermal evolution of Earth...
+        self.X_Mg_init = 0.029 # - initial Mg [mol frac]
+        # self.Mg_0 = 0.0115 # -[] guess
+        # self.X_MgO = 0.5 # - [mol frac] from Badro 2016
+        # self.beta_OMg = 1 # ratio of O to Mg in core from Badro 2016
+        self.X_O_init = 0.06 # - initial O [mol frac]
+        self.X_MgO_init = 0.9 # - [mol frac] Maybe what it should be?
+        # self.C_m = 4e-5 # - [/K] nominal value from O'Rourke, Korenaga, Stevenson 2016
+        self.C_m = 2.5e-5  # - [/K] lower bound from O'Rourke, Korenaga, Stevenson 2016

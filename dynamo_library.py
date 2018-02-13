@@ -4,17 +4,14 @@ from numpy import pi, exp
 import scipy.optimize as opt
 import planetary_energetics as pe
 import input_parameters as params
+import solubility_library as sol
 
 class core_energetics(pe.Layer):
-    def __init__(self, inner_radius, outer_radius, params={}):
-        pe.Layer.__init__(self, inner_radius, outer_radius, params=params)
-        self.compute_mass_of_core()
-        self.reset_current_values()
-    
     def reset_current_values(self):
         self.current_values = params.Parameters('self')
         self.current_values.C_r = None
         self.current_values.C_c = None
+        self.current_values.C_m = None
         self.current_values.I_s = None
         self.current_values.I_T = None
         self.current_values.I_g = None
@@ -48,6 +45,15 @@ class core_energetics(pe.Layer):
         self.current_values.Delta_E = None
         self.current_values.E_phi = None
         self.current_values.Q_phi = None
+
+    def __init__(self, inner_radius, outer_radius, params={}):
+        pe.Layer.__init__(self, inner_radius, outer_radius, params=params)
+        self.compute_mass_of_core()
+        self.reset_current_values()
+        self.Mg_sol = sol.MgBadro()
+        self.X_O = self.params.core.X_O_init
+        self.X_Mg = self.params.core.X_Mg_init
+        self.X_MgO = self.params.core.X_MgO_init
 
     def rho(self, r):
         p = self.params.core
@@ -151,10 +157,11 @@ class core_energetics(pe.Layer):
         :return:
         '''
         p = self.params.core
+        P = 135e9 # pressure GPa
         if self.current_values.C_m is not None and not recompute:
             return self.current_values.C_m
         else:
-            C_m = 5e-5
+            C_m = self.Mg_sol.C_m(P, T_cmb, X_MgO=p.X_MgO, X_O=self.X_O)
             if store_computed:
                 self.current_values.C_m = C_m
             return C_m
@@ -424,9 +431,16 @@ class core_energetics(pe.Layer):
         if self.current_values.Qt_gm is not None and not recompute:
             return self.current_values.Qt_gm
         else:
-            I_g = self.I_g(T_cmb, recompute=recompute, store_computed=store_computed)
-            C_m = self.C_m(T_cmb, recompute=recompute, store_computed=store_computed)
-            Qt_gm = I_g*p.alpha_m*C_m
+            X_Mg_equi = self.Mg_sol.solubility(None, T_cmb, X_MgO=p.X_MgO, X_O=self.X_O)
+            if X_Mg_equi < self.X_Mg:
+                I_g = self.I_g(T_cmb, recompute=recompute, store_computed=store_computed)
+                C_m = self.C_m(T_cmb, recompute=recompute, store_computed=store_computed)
+                Qt_gm = I_g*p.alpha_m*C_m
+                self.X_O = self.X_O - (self.X_Mg-X_Mg_equi)
+                self.X_Mg = X_Mg_equi
+
+            else:
+                Qt_gm = 0.
             if store_computed:
                 self.current_values.Qt_gm = Qt_gm
             return Qt_gm
@@ -436,7 +450,7 @@ class core_energetics(pe.Layer):
         if self.current_values.Q_gm is not None and not recompute:
             return self.current_values.Q_gm
         else:
-            Q_gm = self.Qt_g(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
+            Q_gm = self.Qt_gm(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
             if store_computed:
                 self.current_values.Q_gm = Q_gm
             return Q_gm
@@ -489,7 +503,11 @@ class core_energetics(pe.Layer):
         if self.current_values.Qt_T is not None and not recompute:
             return self.current_values.Qt_T
         else:
-            Qt_T = self.Qt_g(T_cmb, recompute=recompute, store_computed=store_computed) + self.Qt_L(T_cmb, recompute=recompute, store_computed=store_computed) + self.Qt_s(T_cmb, recompute=recompute, store_computed=store_computed)
+            Qt_g = self.Qt_g(T_cmb, recompute=recompute, store_computed=store_computed)
+            Qt_L = self.Qt_L(T_cmb, recompute=recompute, store_computed=store_computed)
+            Qt_s = self.Qt_s(T_cmb, recompute=recompute, store_computed=store_computed)
+            Qt_gm = self.Qt_gm(T_cmb, recompute=recompute, store_computed=store_computed)
+            Qt_T = Qt_g + Qt_L + Qt_s + Qt_gm
             if store_computed:
                 self.current_values.Qt_T = Qt_T
             return Qt_T
@@ -499,7 +517,11 @@ class core_energetics(pe.Layer):
         if self.current_values.Et_T is not None and not recompute:
             return self.current_values.Et_T
         else:
-            Et_T = self.Et_g(T_cmb) + self.Et_L(T_cmb) + self.Et_s(T_cmb)
+            Et_g = self.Et_g(T_cmb, recompute=recompute, store_computed=store_computed)
+            Et_L = self.Et_L(T_cmb, recompute=recompute, store_computed=store_computed)
+            Et_s = self.Et_s(T_cmb, recompute=recompute, store_computed=store_computed)
+            Et_gm = self.Et_gm(T_cmb, recompute=recompute, store_computed=store_computed)
+            Et_T = Et_g + Et_L + Et_s + Et_gm
             if store_computed:
                 self.current_values.Et_T = Et_T
             return Et_T
@@ -509,7 +531,9 @@ class core_energetics(pe.Layer):
         if self.current_values.Q_cmb is not None and not recompute:
             return self.current_values.Q_cmb
         else:
-            Q_cmb = self.Q_R(h, recompute=recompute, store_computed=store_computed) + self.Qt_T(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt
+            Q_R = self.Q_R(h, recompute=recompute, store_computed=store_computed)
+            Qt_T = self.Qt_T(T_cmb, recompute=recompute, store_computed=store_computed)
+            Q_cmb = Q_R + Qt_T*dT_cmb_dt
             if store_computed:
                 self.current_values.Q_cmb = Q_cmb
             return Q_cmb
@@ -519,7 +543,10 @@ class core_energetics(pe.Layer):
         if self.current_values.Delta_E is not None and not recompute:
             return self.current_values.Delta_E
         else:
-            Delta_E = self.E_R(T_cmb, h, recompute=recompute, store_computed=store_computed) + self.Et_T(T_cmb, recompute=recompute, store_computed=store_computed)*dT_cmb_dt - self.E_k(recompute=recompute, store_computed=store_computed)
+            E_R = self.E_R(T_cmb, h, recompute=recompute, store_computed=store_computed)
+            Et_T = self.Et_T(T_cmb, recompute=recompute, store_computed=store_computed)
+            E_k = self.E_k(recompute=recompute, store_computed=store_computed)
+            Delta_E = E_R + Et_T*dT_cmb_dt - E_k
             if store_computed:
                 self.current_values.Delta_E = Delta_E
             return Delta_E
@@ -529,7 +556,8 @@ class core_energetics(pe.Layer):
         if self.current_values.E_phi is not None and not recompute:
             return self.current_values.E_phi
         else:
-            Q_phi = self.E_phi(T_cmb, dT_cmb_dt, h, recompute=recompute, store_computed=store_computed)*T_D
+            E_phi = self.E_phi(T_cmb, dT_cmb_dt, h, recompute=recompute, store_computed=store_computed)
+            Q_phi = E_phi*T_D
             if store_computed:
                 self.current_values.Q_phi = Q_phi
             return Q_phi
@@ -559,17 +587,19 @@ class core_energetics(pe.Layer):
         dT_cmb_dt = (Q_cmb - Q_R)/Qt_T
         return dT_cmb_dt
 
-    def stable_layer_thickness(self, T_cmb, dT_cmb_dt, h):
+    def Q_adiabat_at_r(self, T_cmb, r):
         p = self.params.core
-        A_cmb = 4*pi*p.r_c**2
-        dTq_dr_cmb = -self.Q_cmb(T_cmb, dT_cmb_dt, h, recompute=True, store_computed=False)/(A_cmb*p.k)
-        dTa_dr_cmb = self.dTa_dr(T_cmb, p.r_c)
-        print('dTq_dr = {0:.2f} K/km'.format(dTq_dr_cmb*1e3))
-        print('dTa_dr = {0:.2f} K/km'.format(dTa_dr_cmb*1e3))
-        D_stable = lambda r: self.dTa_dr(T_cmb, r) + self.Q_cmb(T_cmb, dT_cmb_dt, 0., recompute=True, store_computed=False)/(A_cmb*p.k)
-        if dTq_dr_cmb < dTa_dr_cmb:
-            return p.r_c
-        elif dTq_dr_cmb > 0.:
+        Q_adiabat = 8*pi*p.k*r**3/p.D**2*self.T_adiabat_from_T_cmb(T_cmb, r)
+        return Q_adiabat
+
+    def stable_layer_thickness(self, T_cmb, dT_cmb_dt, h, recompute=False, store_computed=True):
+        p = self.params.core
+        Q_cmb = self.Q_cmb(T_cmb, dT_cmb_dt, h, recompute=True, store_computed=False)
+
+        D_stable = lambda r: self.Q_adiabat_at_r(T_cmb, r) - Q_cmb
+        if Q_cmb > self.Q_adiabat_at_r(T_cmb, p.r_c):
             return 0.
+        elif Q_cmb < 0.:
+            return p.r_c
         else:
             return p.r_c - opt.brentq(D_stable, p.r_c, 0.)

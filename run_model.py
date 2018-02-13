@@ -23,7 +23,17 @@ Andrault_a_chondritic = params.Andrault_2011_Stevenson(composition="a_chondritic
 param3layer = Andrault_a_chondritic
 param3layer.core = params.Nimmo_2015()
 
+### Set Viscosity at two temperatures
+T1 = 2500. # K
+nu1 = 0.05e15# m^2/s
+T2 = 1500. # K
+nu2 = 120.0e15 # m^2/s
+A = np.log(nu1/nu2)/(1/T1-1/T2)
+nu_0 = nu1*np.exp(-A/T1)
 
+param3layer.mantle.A = A
+param3layer.mantle.nu_0 = nu_0
+param3layer.core.X_MgO = 0.5
 ### Define Earth
 
 Earth = pe.Planet( [ dyn.core_energetics( 0.0, param3layer.R_c0, params=param3layer) ,
@@ -36,10 +46,9 @@ Earth = pe.Planet( [ dyn.core_energetics( 0.0, param3layer.R_c0, params=param3la
 # T_cmb_initial = 8200. # K
 # T_magma_ocean_initial = 7245. # K
 # T_mantle_initial = 4200. # K
-T_cmb_initial = 5200. # K
+T_cmb_initial = 5100. # K
 # T_magma_ocean_initial = 8400. # K
 # T_mantle_initial = 5200. # K
-
 
 
 ### Integrate Model for Solution
@@ -63,6 +72,8 @@ t_sec = t[::dN]
 t_plt = t_sec/(const_yr_to_sec*1e6)
 r_i = np.array([Earth.core_layer.r_i(T, recompute=True, store_computed=False) for T in T_cmb])
 
+dT_cmb_dt = np.diff(T_cmb)/np.diff(t_sec)
+
 t_all = np.array(Earth.t_all)/(365.25*24.*3600.*1e6)
 D = np.array(Earth.D_mo)
 T_umo = np.array(Earth.T_umo)
@@ -72,9 +83,14 @@ T_umo = T_umo[::dN]
 D_mo = D_mo_filtered[::dN]
 t_filtered = t_all_filtered[::dN]
 
+D_st = np.zeros_like(dT_cmb_dt)
+Q_a = np.zeros_like(dT_cmb_dt)
+for i,(T, dT) in enumerate(zip(T_cmb[:-1], dT_cmb_dt)):
+    D_st[i]  = Earth.core_layer.stable_layer_thickness(T, dT, 0., recompute=True, store_computed=False)
+    Q_a[i] = Earth.core_layer.Q_adiabat_at_r(T, 3480e3)
 ### Plot Results
 T_i = Earth.core_layer.T_adiabat_from_T_cmb(T_cmb, r_i)
-peplot.plot_thermal_history2(t_plt, T_cmb, T_um, times_calculated=t_filtered, T_upper_magma_ocean=T_umo, D_magma_ocean=D_mo, r_i=r_i, T_i=T_i)
+peplot.plot_thermal_history2(t_plt, T_cmb, T_um, times_calculated=t_filtered, T_upper_magma_ocean=T_umo, D_magma_ocean=D_mo, r_i=r_i, T_i=T_i, D_st=D_st)
 
 
 ### Plot viscosity
@@ -92,7 +108,8 @@ plt.savefig('viscosity.pdf')
 ## Calculate Solubility and Exsolution
 P_cmb = 135e6 # Pa
 # initial_concentration = 0.0095
-initial_concentration = 0.0115
+# initial_concentration = 0.0115
+X_Mg_0 = param3layer.core.X_Mg_0
 Tin = y[::dN,0]
 Pin = P_cmb*np.ones(len(Tin))
 
@@ -102,9 +119,10 @@ Pin = P_cmb*np.ones(len(Tin))
 Mg_sol = sol.MgBadro()
 solubility05 = Mg_sol.solubility_OxyRatio(Tin, X_MgO=0.5)
 wt05 = Mg_sol.solubility_to_wt(solubility05)
+initial_concentration = Mg_sol.Mg_mol_frac_to_MgO_wtp(X_Mg_0)
 ex_wt05 = Mg_sol.exsolution(wt05, t_plt, initial_concentration=initial_concentration)
 
-solubility10 = Mg_sol.solubility_OxyRatio(Tin, X_MgO=1.0)
+solubility10 = Mg_sol.solubility_OxyRatio(Tin, X_MgO=0.9)
 wt10 = Mg_sol.solubility_to_wt(solubility10)
 ex_wt10 = Mg_sol.exsolution(wt10, t_plt, initial_concentration=initial_concentration)
 
@@ -125,85 +143,62 @@ plt.savefig('Mg_sol_ex_Tcmb0_{0:.0f}K.pdf'.format(T_cmb_initial))
 ## Calculate Dynamo Power
 
 T_D = 5000. # K - from Nimmo 2015
-dT_cmb_dt = np.diff(T_cmb)/np.diff(t_sec)
+
+
 Q_phi = np.zeros_like(dT_cmb_dt)
 Q_cmb = np.zeros_like(dT_cmb_dt)
 E_phi = np.zeros_like(dT_cmb_dt)
 E_k = np.zeros_like(dT_cmb_dt)
 Q_k = np.zeros_like(dT_cmb_dt)
+Q_gm = np.zeros_like(dT_cmb_dt)
+Q_g = np.zeros_like(dT_cmb_dt)
+Q_s = np.zeros_like(dT_cmb_dt)
+E_gm = np.zeros_like(dT_cmb_dt)
+E_g = np.zeros_like(dT_cmb_dt)
+E_s = np.zeros_like(dT_cmb_dt)
 h = Earth.core_layer.heat_production_per_kg(t_sec)
 for i, (T, dT, ht) in enumerate(zip(T_cmb[:-1], dT_cmb_dt, h[:-1])):
     Earth.core_layer.reset_current_values()
     Q_phi[i] = Earth.core_layer.Q_phi(T, dT, ht, T_D)
     Q_cmb[i] = Earth.core_layer.Q_cmb(T, dT, ht)
+    Q_gm[i] = Earth.core_layer.Q_gm(T, dT)
     Q_k[i] = Earth.core_layer.Q_k(T)
+    Q_g[i] = Earth.core_layer.Q_g(T, dT)
+    Q_s[i] = Earth.core_layer.Q_s(T, dT)
     E_phi[i] = Earth.core_layer.E_phi(T,dT, ht)
+    E_gm[i] = Earth.core_layer.E_gm(T,dT)
+    E_g[i] = Earth.core_layer.E_g(T,dT)
+    E_s[i] = Earth.core_layer.E_s(T,dT)
     E_k[i] = Earth.core_layer.E_k()
 
-min_E = 200e6 # W/K
+min_E = 100e6 # W/K
 min_Q = min_E*T_D # W
 fig, (ax0, ax1) = plt.subplots(1,2,figsize=(14,6))
-ax0.plot(t_plt[:-1], Q_phi/1e12, 'b-')
-ax0.plot(t_plt[:-1], Q_cmb/1e12, 'b-.')
+ax0.plot(t_plt[:-1], Q_s/1e12, 'b--')
+ax0.plot(t_plt[:-1], Q_g/1e12, 'b--')
+ax0.plot(t_plt[:-1], Q_gm/1e12, 'b-.')
+ax0.plot(t_plt[:-1], Q_cmb/1e12, 'b-')
 ax0.plot(t_plt[:-1], Q_k/1e12, 'b--')
-ax0.plot(t_plt, np.ones_like(t_plt)*min_Q/1e12, color='0.5', alpha=0.5, linewidth=5.)
+ax0.plot(t_plt[:-1], Q_phi/1e12, 'r-')
+ax0.plot(t_plt, np.ones_like(t_plt)*min_Q/1e12, 'r', alpha=0.5, linewidth=5.)
 ax0.grid()
-ax0.legend(['Q_phi','Q_cmb','Q_k', 'min_Q'])
+ax0.legend(['Q_s','Q_g','Q_gm','Q_cmb','Q_k','Q_phi', 'min_Q_phi'])
 ax0.set_ylabel('TW', color='b')
 ax0.set_ylim([-5, 30])
 for tl in ax0.get_yticklabels():
     tl.set_color('b')
-ax1.plot(t_plt[:-1], E_phi/1e6, 'g-')
+ax1.plot(t_plt[:-1], E_s/1e6, 'g--')
+ax1.plot(t_plt[:-1], E_g/1e6, 'g--')
+ax1.plot(t_plt[:-1], E_gm/1e6, 'g-.')
 ax1.plot(t_plt[:-1], E_k/1e6, 'g--')
-ax1.plot(t_plt, np.ones_like(t_plt)*min_E/1e6, color='0.5', alpha=0.5, linewidth=5.)
+ax1.plot(t_plt[:-1], E_phi/1e6, 'r-')
+ax1.plot(t_plt, np.ones_like(t_plt)*min_E/1e6, 'r', alpha=0.5, linewidth=5.)
 ax1.set_ylabel('MW/K', color='g')
 for tl in ax1.get_yticklabels():
     tl.set_color('g')
 ax1.grid()
-ax1.legend(['E_phi','E_k','min_E'])
+ax1.legend(['E_s','E_g','E_gm','E_k','E_phi','min_E_phi'])
 plt.savefig('Dynamo_Power_test_Tcmb0_{0:.0f}K.pdf'.format(T_cmb_initial))
-
-# rho_c = 11000
-# delta_rho_c = 500
-# rho_MgO = rho_c-delta_rho_c
-# g = 5
-# h = 3480e3/2
-# C_p = 800
-# L = 1e6
-# M_c = Earth.core_layer.volume*rho_c
-# dTdt = np.diff(T_cmb)/np.diff(t_sec)
-# Q_s = -M_c*C_p*dTdt*5e-2
-# Q_g = -delta_rho_c*g*h*ex_wt05/2e16
-# Q_L = -rho_c*L*ex_wt05*M_c/2e16
-# Q_MgO = Q_g + Q_L
-# Q_g2 = -delta_rho_c*g*h*ex_wt10/2e16
-# Q_L2 = -rho_c*L*ex_wt10*M_c/2e16
-# Q_MgO2 = Q_g2 + Q_L2
-#
-#
-# L_Eg = 1e6
-# dRi_dTcmb = np.diff(r_i)/np.diff(T_cmb)
-# inner_core_surface_area = 4*np.pi*r_i[:-1]**2
-# Q_ic = -L_Eg * rho_c * inner_core_surface_area * dRi_dTcmb/1e15
-# Q_total = Q_s+Q_MgO+Q_ic
-# Q_total2 = Q_s+Q_MgO2+Q_ic
-#
-# print(Q_s, Q_g, Q_L)
-# fig = plt.figure(figsize=(8,6))
-# plt.plot(t_plt[:-1], Q_s/1e12)
-# plt.plot(t_plt[:-1], Q_MgO/1e12)
-# plt.plot(t_plt[:-1], Q_ic/1e12)
-# plt.plot(t_plt[:-1], Q_total/1e12)
-# plt.plot(t_plt[:-1], Q_total2/1e12)
-# plt.plot(t_plt, np.ones_like(t_plt)*0.9, '-', alpha=0.5, linewidth=10., color='0.5')
-# plt.legend(['Q_s','Q_MgO','Q_ic','Q_total'])
-# plt.title('Dynamo Power Over Time')
-# plt.legend(['magma ocean','MgO layer','Minimum dynamo power'])
-# plt.xlabel('Time (Myr)')
-# plt.ylabel('Power (TW)')
-# plt.xlim([0,4500])
-# plt.savefig('Dynamo_Power_test.pdf')
-
 
 ## Calculate Isotopic ratios
 a = 0.

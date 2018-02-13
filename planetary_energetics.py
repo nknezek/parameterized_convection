@@ -24,7 +24,7 @@ class Planet(object):
         self.mantle_layer.planet = self
         print("R_p={0:.1f} km, R_mo={1:.1f} km, R_c={2:.1f} km".format(self.mantle_layer.outer_radius, self.magma_ocean_layer.outer_radius, self.core_layer.outer_radius))
 
-    def integrate( self, times, T_cmb_initial, T_magma_ocean_initial=None, T_mantle_initial=None, verbose=False):
+    def integrate( self, times, T_cmb_initial, T_magma_ocean_initial=None, T_mantle_initial=None, H_MgO_initial=None, verbose=False):
         self.D_mo = []
         self.t_all = []
         self.T_umo = []
@@ -35,6 +35,7 @@ class Planet(object):
             Dlbl_mo = self.magma_ocean_layer.lower_boundary_layer_thickness(values[1], values[0])
             T_umo = self.magma_ocean_layer.upper_temperature(values[1])
             D_mo = self.magma_ocean_layer.thickness
+
             if verbose:
                 print("\ntime={0:.4f} Myr".format(t/(365.25*24.*3600.*1e6)))
                 print("T_cmb={0:.1f} K".format(values[0]))
@@ -57,13 +58,13 @@ class Planet(object):
             self.t_all.append(t)
             self.D_mo.append(D_mo)
             self.T_umo.append(T_umo)
-            return np.array([dTcore_dt, dTmagmaocean_dt, dTmantle_dt])
+            return np.array([dTcore_dt, dTmagmaocean_dt, dTmantle_dt, dH_dt])
 
         if T_magma_ocean_initial is None:
             T_magma_ocean_initial = self.magma_ocean_layer.adiabat_from_bottom(T_cmb_initial)+10.
             T_mantle_initial = self.mantle_layer.adiabat_from_bottom(T_magma_ocean_initial, self.mantle_layer.thickness-500e3)+10.
         print("T_cmb0={0:.1f} K, T_mo0={1:.1f} K, T_ma0={2:.1f} K".format(T_cmb_initial, T_magma_ocean_initial, T_mantle_initial))
-        solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_magma_ocean_initial, T_mantle_initial]), times)
+        solution = integrate.odeint( ODE, np.array([T_cmb_initial, T_magma_ocean_initial, T_mantle_initial, X_MgO_initial]), times)
         print("done!")
         return times, solution
 
@@ -123,7 +124,7 @@ class Layer(object):
 
         self.volume = 4.0/3.0 * np.pi * ( self.outer_radius**3. - self.inner_radius**3.)
 
-    def set_boundary_temperatures(self,outer_temperature,inner_temperature):
+    def set_boundary_temperatures(self, outer_temperature, inner_temperature):
         '''
         All layers should be able to track the temperatures of the their outer and inner
         boundary.
@@ -152,27 +153,27 @@ class CoreLayer(Layer):
         pc = self.params.core
         R_c = self.inner_radius
         R_i = self.outer_radius
-        self.light_alloy = pc.x_0*(R_c**3)/(R_c**3-R_i**3)
+        self.light_alloy = pc.x_0 * (R_c ** 3) / (R_c ** 3 - R_i ** 3)
         return self.light_alloy
 
     def set_inner_core_radius(self, R_i):
         self.inner_radius = R_i
         return self.inner_radius
 
-    ### We could code the integrals here. 
+    ### We could code the integrals here.
     def core_mantle_boundary_temp(self):
-        return  self.T_average / self.mu
+        return self.T_average / self.mu
 
     def stevenson_liquidus(self, P):
         '''
         Equation (3) from Stevenson 1983
-        
+
         Calculates the liquidus temp for a given pressure in the core P
         '''
-        x  = self.light_alloy
+        x = self.light_alloy
         pc = self.params.core
-        return pc.T_m0 * (1. - pc.alpha * x) * (1. + pc.T_m1 * P + pc.T_m2 * P**2.)
-    
+        return pc.T_m0 * (1. - pc.alpha * x) * (1. + pc.T_m1 * P + pc.T_m2 * P ** 2.)
+
     def stevenson_adiabat(self, P, T_cmb):
         '''
         Equation (4) from Stevenson 1983
@@ -180,61 +181,62 @@ class CoreLayer(Layer):
         Calculates adiabatic temperature for a given pressure within the core P, given the temperature at the CMB T_cmb
         '''
         pc = self.params.core
-        return T_cmb * (1. + pc.T_a1*P + pc.T_a2*P**2.) / (1. + pc.T_a1*pc.P_cm + pc.T_a2*pc.P_cm**2.)
-    
+        return T_cmb * (1. + pc.T_a1 * P + pc.T_a2 * P ** 2.) / (1. + pc.T_a1 * pc.P_cm + pc.T_a2 * pc.P_cm ** 2.)
+
     def calculate_pressure_io_boundary(self, T_cmb):
         pc = self.params.core
-        opt_function = lambda P: (self.stevenson_adiabat(P, T_cmb)-self.stevenson_liquidus(P))
-        if self.stevenson_liquidus(pc.P_c) <= self.stevenson_adiabat(pc.P_c,T_cmb):
+        opt_function = lambda P: (self.stevenson_adiabat(P, T_cmb) - self.stevenson_liquidus(P))
+        if self.stevenson_liquidus(pc.P_c) <= self.stevenson_adiabat(pc.P_c, T_cmb):
             P_io = pc.P_c
-        elif self.stevenson_liquidus(pc.P_cm) >= self.stevenson_adiabat(pc.P_cm,T_cmb):
+        elif self.stevenson_liquidus(pc.P_cm) >= self.stevenson_adiabat(pc.P_cm, T_cmb):
             P_io = pc.P_cm
         else:
             P_io = opt.brentq(opt_function, pc.P_c, pc.P_cm)
         return P_io
 
-    def inner_core_radius(self, T_cmb): 
+    def inner_core_radius(self, T_cmb):
         '''
         Equation 5 from Stevenson et al 1983
         '''
         pc = self.params.core
-        R_c  = self.outer_radius
-        P_io = self.calculate_pressure_io_boundary( T_cmb )
-        R_i  = max(0.,np.sqrt(2.*(pc.P_c - P_io)*R_c/(pc.rho*self.params.g)))
+        R_c = self.outer_radius
+        P_io = self.calculate_pressure_io_boundary(T_cmb)
+        R_i = max(0., np.sqrt(2. * (pc.P_c - P_io) * R_c / (pc.rho * self.params.g)))
         return R_i
 
     def core_energy_balance(self, T_cmb, core_flux):
         pc = self.params.core
         core_surface_area = self.outer_surface_area
-        if self.params.source == 'Stevenson_1983' :
+        if self.params.source == 'Stevenson_1983':
             inner_core_surface_area = np.power(self.inner_core_radius(T_cmb), 2.0) * 4. * np.pi
             dRi_dTcmb = 0.
             try:
-                dRi_dTcmb = derivative( self.inner_core_radius, T_cmb, dx=1.0)
+                dRi_dTcmb = derivative(self.inner_core_radius, T_cmb, dx=1.0)
             except ValueError:
                 pass
-        elif self.params.source == 'Driscoll_2014' :
+        elif self.params.source == 'Driscoll_2014':
             dRi_dTcmb = 0.
             inner_core_surface_area = 0.
             # Eqn 29 & 30 from the Driscoll_2014 paper. Note that Eqn 32 in the paper has an error and the form in the code is correct
-            sqrt_term_num = (pc.Dn/self.params.R_c0)**2.*np.log(pc.TFe/T_cmb) - 1.
-            sqrt_term_den = 2.*(1. - 1./(3.*pc.gamma_c))*(pc.Dn/pc.DFe)**2. - 1.
-            if sqrt_term_num/sqrt_term_den > 0 :
-                R_ic = self.params.R_c0*np.sqrt(sqrt_term_num/sqrt_term_den)
-                print('\n\n R_ic={0:.3f}'.format(R_ic/1e3))
+            sqrt_term_num = (pc.Dn / self.params.R_c0) ** 2. * np.log(pc.TFe / T_cmb) - 1.
+            sqrt_term_den = 2. * (1. - 1. / (3. * pc.gamma_c)) * (pc.Dn / pc.DFe) ** 2. - 1.
+            if sqrt_term_num / sqrt_term_den > 0:
+                R_ic = self.params.R_c0 * np.sqrt(sqrt_term_num / sqrt_term_den)
+                print('\n\n R_ic={0:.3f}'.format(R_ic / 1e3))
                 inner_core_surface_area = np.power(R_ic, 2.0) * 4. * np.pi
-                dRi_dTcmb = -1.*((self.params.R_c0/2./T_cmb)*(pc.Dn/self.params.R_c0)**2.)/(sqrt_term_num*sqrt_term_den)
-        else :
+                dRi_dTcmb = -1. * ((self.params.R_c0 / 2. / T_cmb) * (pc.Dn / self.params.R_c0) ** 2.) / (
+                sqrt_term_num * sqrt_term_den)
+        else:
             raise ValueError('parameter class is not recognized')
         # print('\n\n ratio={0:.1f}'.format(inner_core_surface_area/core_surface_area))
-        thermal_energy_change = pc.rho*pc.C*self.volume*pc.mu
+        thermal_energy_change = pc.rho * pc.C * self.volume * pc.mu
         latent_heat = -pc.L_Eg * pc.rho * inner_core_surface_area * dRi_dTcmb
-        dTdt = -core_flux * core_surface_area / (thermal_energy_change-latent_heat)
-        dTdt = -core_flux * core_surface_area / (thermal_energy_change)
+        dTdt = -core_flux * core_surface_area / (thermal_energy_change - latent_heat)
+        # dTdt = -core_flux * core_surface_area / (thermal_energy_change)
         return dTdt
 
-    def ODE( self, time, T_cmb_initial, cmb_flux ):
-        dTdt = lambda x, t : self.core_energy_balance(time, x, cmb_flux )
+    def ODE(self, time, T_cmb_initial, cmb_flux):
+        dTdt = lambda x, t: self.core_energy_balance(time, x, cmb_flux)
         return dTdt
 
 class MagmaOceanLayer(Layer):
